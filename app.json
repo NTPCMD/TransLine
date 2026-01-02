@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Transline",
+    "slug": "transline",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./Transline (2).png",
+    "scheme": "transline",
+    "userInterfaceStyle": "light",
+    "splash": {
+      "image": "./Transline (2).png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "assetBundlePatterns": ["**/*"]
+  }
+}
