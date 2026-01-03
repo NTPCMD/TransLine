@@ -2,6 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppStateProvider } from './src/state/AppStateContext';
 
 import SplashScreen from './src/screens/SplashScreen';
@@ -44,31 +45,33 @@ function MainDrawer() {
 
 export default function App() {
   return (
-    <AppStateProvider>
-      <NavigationContainer>
-        <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
-          <Stack.Screen name="Splash" component={SplashScreen} />
-          <Stack.Screen name="Login" component={LoginScreen} />
-          <Stack.Screen name="DriverDeclaration" component={DriverDeclarationScreen} />
-          <Stack.Screen name="StartShift" component={StartShiftScreen} />
-          <Stack.Screen name="PreStartChecklist" component={PreStartChecklistScreen} />
-          <Stack.Screen name="WaitForInstruction" component={WaitForInstructionScreen} />
-          <Stack.Screen name="ReadingsAndPhotos" component={ReadingsAndPhotosScreen} />
-          <Stack.Screen name="Main" component={MainDrawer} />
-          <Stack.Screen name="ActiveShift" component={ActiveShiftScreen} />
-          <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} />
-          <Stack.Screen name="BreakControl" component={BreakControlScreen} />
-          <Stack.Screen name="FuelLog" component={FuelLogScreen} />
-          <Stack.Screen name="IncidentReport" component={IncidentReportScreen} />
-          <Stack.Screen name="SendNote" component={SendNoteScreen} />
-          <Stack.Screen name="EndShift" component={EndShiftScreen} />
-          <Stack.Screen name="MedicalAbsence" component={MedicalAbsenceScreen} />
-          <Stack.Screen name="Announcements" component={AnnouncementsScreen} />
-          <Stack.Screen name="OperationsAlerts" component={OperationsAlertsScreen} />
-          <Stack.Screen name="ComponentsLibrary" component={ComponentsLibraryScreen} />
-          <Stack.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen} />
-        </Stack.Navigator>
-      </NavigationContainer>
-    </AppStateProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <AppStateProvider>
+        <NavigationContainer>
+          <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="Splash" component={SplashScreen} />
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="DriverDeclaration" component={DriverDeclarationScreen} />
+            <Stack.Screen name="StartShift" component={StartShiftScreen} />
+            <Stack.Screen name="PreStartChecklist" component={PreStartChecklistScreen} />
+            <Stack.Screen name="WaitForInstruction" component={WaitForInstructionScreen} />
+            <Stack.Screen name="ReadingsAndPhotos" component={ReadingsAndPhotosScreen} />
+            <Stack.Screen name="Main" component={MainDrawer} />
+            <Stack.Screen name="ActiveShift" component={ActiveShiftScreen} />
+            <Stack.Screen name="ShiftDetails" component={ShiftDetailsScreen} />
+            <Stack.Screen name="BreakControl" component={BreakControlScreen} />
+            <Stack.Screen name="FuelLog" component={FuelLogScreen} />
+            <Stack.Screen name="IncidentReport" component={IncidentReportScreen} />
+            <Stack.Screen name="SendNote" component={SendNoteScreen} />
+            <Stack.Screen name="EndShift" component={EndShiftScreen} />
+            <Stack.Screen name="MedicalAbsence" component={MedicalAbsenceScreen} />
+            <Stack.Screen name="Announcements" component={AnnouncementsScreen} />
+            <Stack.Screen name="OperationsAlerts" component={OperationsAlertsScreen} />
+            <Stack.Screen name="ComponentsLibrary" component={ComponentsLibraryScreen} />
+            <Stack.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen} />
+          </Stack.Navigator>
+        </NavigationContainer>
+      </AppStateProvider>
+    </GestureHandlerRootView>
   );
 }
