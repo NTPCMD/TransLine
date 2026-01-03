@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
-import TextField from '../components/TextField';
 import Button from '../components/Button';
+import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 interface Entry {
@@ -11,22 +11,14 @@ interface Entry {
 }
 
 export default function VehicleMaintenanceLogScreen({ navigation }: ScreenProps<'VehicleMaintenanceLog'>) {
-  const [entries, setEntries] = useState<Entry[]>([
+  const { state } = useAppState();
+  const entries: Entry[] = [
     { id: '1', note: 'Tyre pressure checked' },
     { id: '2', note: 'Washer fluid topped up' },
-  ]);
-  const [note, setNote] = useState('');
-
-  const addEntry = () => {
-    if (!note) {
-      return;
-    }
-    setEntries(prev => [...prev, { id: String(prev.length + 1), note }]);
-    setNote('');
-  };
+  ];
 
   return (
-    <ScreenContainer title="Maintenance log" subtitle="Track vehicle upkeep items">
+    <ScreenContainer title="Maintenance log" subtitle="Driver view (read-only)">
       <View style={styles.card}>
         <FlatList
           data={entries}
@@ -36,8 +28,11 @@ export default function VehicleMaintenanceLogScreen({ navigation }: ScreenProps<
           ItemSeparatorComponent={() => <View style={styles.separator} />}
         />
       </View>
-      <TextField label="New entry" value={note} onChangeText={setNote} placeholder="Describe maintenance" />
-      <Button label="Add entry" onPress={addEntry} />
+
+      <View style={styles.card}>
+        <Text style={styles.item}>Last fuelled: {state.lastFueled ? new Date(state.lastFueled).toLocaleString() : 'No record'}</Text>
+      </View>
+
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
     </ScreenContainer>
   );

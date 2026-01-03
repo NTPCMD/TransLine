@@ -16,6 +16,9 @@ export interface AppState {
   odometerPhoto: string;
   shiftStartTime: Date | null;
   onBreak: boolean;
+  lastFueled?: string | null;
+  breakStartedAt?: string | null;
+  breakAccumulatedSeconds?: number;
 }
 
 interface AppStateContextValue {
@@ -36,6 +39,9 @@ const initialState: AppState = {
   odometerPhoto: '',
   shiftStartTime: null,
   onBreak: false,
+  lastFueled: null,
+  breakStartedAt: null,
+  breakAccumulatedSeconds: 0,
 };
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
