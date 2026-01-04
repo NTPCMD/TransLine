@@ -1,3 +1,5 @@
+import 'react-native-gesture-handler';
+import 'react-native-reanimated';
 import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
@@ -30,7 +32,7 @@ const Drawer = createDrawerNavigator();
 
 function MainDrawer() {
   return (
-    <Drawer.Navigator initialRouteName="ActiveShift" screenOptions={{ headerShown: false }}>
+      <Drawer.Navigator initialRouteName="ActiveShift" screenOptions={{ headerShown: false }}>
       <Drawer.Screen name="ActiveShift" component={require('./src/screens/ActiveShiftScreen').default} />
       <Drawer.Screen name="ShiftDetails" component={require('./src/screens/ShiftDetailsScreen').default} />
       <Drawer.Screen name="FuelLog" component={require('./src/screens/FuelLogScreen').default} />

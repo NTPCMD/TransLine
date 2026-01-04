@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, ScrollView } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenContainer from '../components/ScreenContainer';
 import InfoCard from '../components/InfoCard';
 import Button from '../components/Button';
@@ -7,31 +8,42 @@ import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 const MAX_BREAK_SECONDS = 30 * 60; // 30 minutes
+const DEFAULT_BREAK_SECONDS = 15 * 60; // 15 minutes default
+
+type BreakStatus = 'idle' | 'running' | 'paused';
 
 export default function BreakControlScreen({ navigation }: ScreenProps<'BreakControl'>) {
   const { state, updateAppState } = useAppState();
-  const [now, setNow] = useState(Date.now());
+  const [status, setStatus] = useState<BreakStatus>('idle');
+  const [secondsElapsed, setSecondsElapsed] = useState(0);
 
+  // Timer effect - only runs when status is "running"
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, []);
+    if (status !== 'running') return;
 
-  const getAccumulated = () => {
-    const acc = state.breakAccumulatedSeconds ?? 0;
-    if (state.breakStartedAt) {
-      const started = new Date(state.breakStartedAt).getTime();
-      const delta = Math.floor((now - started) / 1000);
-      return acc + delta;
-    }
-    return acc;
-  };
+    const id = setInterval(() => {
+      setSecondsElapsed((s) => {
+        const accumulated = (state.breakAccumulatedSeconds ?? 0);
+        const newTotal = accumulated + s + 1;
+
+        if (newTotal >= MAX_BREAK_SECONDS) {
+          setStatus('idle');
+          return 0;
+        }
+        return s + 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(id);
+  }, [status, state.breakAccumulatedSeconds]);
 
   const startBreak = () => {
     if ((state.breakAccumulatedSeconds ?? 0) >= MAX_BREAK_SECONDS) {
       alert('Maximum break time (30 minutes) already reached for this shift.');
       return;
     }
+    setStatus('running');
+    setSecondsElapsed(0);
     updateAppState({ onBreak: true, breakStartedAt: new Date().toISOString() });
   };
 
@@ -40,56 +52,108 @@ export default function BreakControlScreen({ navigation }: ScreenProps<'BreakCon
     const started = new Date(state.breakStartedAt).getTime();
     const delta = Math.floor((Date.now() - started) / 1000);
     const newAccum = (state.breakAccumulatedSeconds ?? 0) + delta;
+    setStatus('paused');
     updateAppState({ onBreak: false, breakStartedAt: null, breakAccumulatedSeconds: newAccum });
   };
 
+  const resumeBreak = () => {
+    setStatus('running');
+    updateAppState({ onBreak: true, breakStartedAt: new Date().toISOString() });
+  };
+
   const endBreak = () => {
-    // End and navigate back
-    if (state.breakStartedAt) pauseBreak();
+    if (state.breakStartedAt && status === 'running') {
+      pauseBreak();
+    }
+    setStatus('idle');
+    setSecondsElapsed(0);
     navigation.goBack();
   };
 
-  const accumulated = getAccumulated();
+  const accumulated = (state.breakAccumulatedSeconds ?? 0) + (status === 'running' ? secondsElapsed : 0);
   const minutes = Math.floor(accumulated / 60);
   const seconds = accumulated % 60;
+  const remainingSeconds = MAX_BREAK_SECONDS - accumulated;
+  const remainingMinutes = Math.floor(remainingSeconds / 60);
 
   return (
-    <ScreenContainer title="Break control" subtitle="Manage rest breaks">
-      <InfoCard title="Status">
-        <Text style={styles.text}>On break: {state.onBreak ? 'Yes' : 'No'}</Text>
-        <Text style={styles.meta}>Total this shift: {minutes}m {seconds}s</Text>
-        <Text style={styles.meta}>Maximum allowed: 30 minutes</Text>
-      </InfoCard>
+    <SafeAreaView style={styles.container}>
+      <ScrollView contentContainerStyle={styles.content}>
+        <Text style={styles.title}>Break Control</Text>
+        <Text style={styles.subtitle}>Manage rest breaks</Text>
 
-      {!state.onBreak && !(state.breakStartedAt) ? (
-        <Button label="Start break" onPress={startBreak} />
-      ) : null}
+        <InfoCard title="Status">
+          <Text style={styles.text}>Status: {status === 'idle' ? 'Not on break' : status === 'running' ? 'On break' : 'Paused'}</Text>
+          <Text style={styles.meta}>Current session: {Math.floor(secondsElapsed / 60)}m {secondsElapsed % 60}s</Text>
+          <Text style={styles.meta}>Total this shift: {minutes}m {seconds}s</Text>
+          <Text style={styles.meta}>Remaining allowed: {remainingMinutes}m {remainingSeconds % 60}s</Text>
+        </InfoCard>
 
-      {state.onBreak && state.breakStartedAt ? (
-        <View>
-          <Button label="Pause break" onPress={pauseBreak} />
-          <Button label="End break" variant="ghost" onPress={endBreak} />
-        </View>
-      ) : null}
+        {/* Idle state - show Start button */}
+        {status === 'idle' && (
+          <View style={styles.buttonGroup}>
+            <Button label="Start Break" onPress={startBreak} />
+          </View>
+        )}
 
-      {!state.onBreak && (state.breakAccumulatedSeconds ?? 0) > 0 ? (
-        <View>
-          <Button label="Resume break" onPress={startBreak} />
-          <Button label="End break" variant="ghost" onPress={endBreak} />
-        </View>
-      ) : null}
+        {/* Running state - show Pause and End buttons */}
+        {status === 'running' && (
+          <View style={styles.buttonGroup}>
+            <Button label="Pause Break" onPress={pauseBreak} />
+            <Button label="End Break" variant="ghost" onPress={endBreak} />
+          </View>
+        )}
 
-      <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
-    </ScreenContainer>
+        {/* Paused state - show Resume and End buttons */}
+        {status === 'paused' && (
+          <View style={styles.buttonGroup}>
+            <Button label="Resume Break" onPress={resumeBreak} />
+            <Button label="End Break" variant="ghost" onPress={endBreak} />
+          </View>
+        )}
+
+        <View style={styles.spacer} />
+        <Button label="Back to Shift" variant="ghost" onPress={() => navigation.goBack()} />
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#F5F5F5',
+  },
+  content: {
+    padding: 16,
+    gap: 12,
+  },
+  title: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#111827',
+    marginBottom: 4,
+  },
+  subtitle: {
+    fontSize: 14,
+    color: '#6B7280',
+    marginBottom: 16,
+  },
   text: {
     color: '#111827',
     fontSize: 16,
+    marginBottom: 8,
   },
   meta: {
     color: '#4B5563',
+    fontSize: 14,
+    marginBottom: 4,
+  },
+  buttonGroup: {
+    gap: 12,
+    marginTop: 16,
+  },
+  spacer: {
+    height: 16,
   },
 });
