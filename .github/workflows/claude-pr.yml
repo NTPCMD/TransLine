@@ -1,89 +1,24 @@
-name: Claude -> PR from Issue
+- name: Run Claude Code (edit repo)
+  uses: anthropics/claude-code-base-action@v0.0.20
+  with:
+    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+    timeout_minutes: 20
+    use_node_cache: true
+    prompt: |
+      You are working in a GitHub repo. Implement the feature requested in this GitHub Issue.
 
-on:
-  issues:
-    types: [opened]
+      ISSUE TITLE:
+      ${{ github.event.issue.title }}
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: read
+      ISSUE BODY:
+      ${{ github.event.issue.body }}
 
-jobs:
-  claude_pr:
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Create branch
-        id: branch
-        run: |
-          BRANCH="claude/issue-${{ github.event.issue.number }}-${{ github.run_id }}"
-          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
-          git checkout -b "$BRANCH"
-
-      - name: Run Claude Code (edit repo)
-        uses: anthropics/claude-code-base-action@v0.0.14
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          timeout_minutes: 20
-          # If your project is Node/Expo, caching helps
-          use_node_cache: true
-          prompt: |
-            You are working in a GitHub repo. Implement the feature requested in this GitHub Issue.
-
-            ISSUE TITLE:
-            ${{ github.event.issue.title }}
-
-            ISSUE BODY:
-            ${{ github.event.issue.body }}
-
-            Requirements:
-            - Make the changes end-to-end (UI + state + persistence if the app already persists shift data).
-            - Keep code consistent with existing patterns in the repo.
-            - Update types/models as needed.
-            - If there are tests or a build script, run them and fix any errors.
-            - Do NOT commit or open PR yourself; the workflow will do that after you finish edits.
-
-      - name: Install deps (if package.json exists)
-        run: |
-          if [ -f package.json ]; then
-            npm ci || npm install
-          fi
-
-      - name: Try lint/test/build (best effort)
-        run: |
-          if [ -f package.json ]; then
-            npm run lint --if-present || true
-            npm test --if-present || true
-            npm run build --if-present || true
-          fi
-
-      - name: Commit changes (if any)
-        run: |
-          if git status --porcelain | grep .; then
-            git config user.name "claude-bot"
-            git config user.email "claude-bot@users.noreply.github.com"
-            git add -A
-            git commit -m "Implement shift checklist + end-of-shift summary (Issue #${{ github.event.issue.number }})"
-          else
-            echo "No changes to commit."
-          fi
-
-      - name: Push branch
-        run: |
-          git push -u origin "${{ steps.branch.outputs.branch }}"
-
-      - name: Create PR
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh pr create \
-            --title "Issue #${{ github.event.issue.number }}: ${{ github.event.issue.title }}" \
-            --body "Auto-generated PR from Issue #${{ github.event.issue.number }} via Claude workflow." \
-            --head "${{ steps.branch.outputs.branch }}" \
-            --base "main"
+      Requirements:
+      - Add a start-of-shift checklist item: "Is the vehicle clean?"
+      - Add end-of-shift questions:
+        - "Have you removed all rubbish from the vehicle?" (yes/no)
+        - "End of shift notes" (text)
+      - Persist these fields with the shift record.
+      - Display them in the shift summary/details screen.
+      - Follow existing UI patterns and navigation.
+      - Do NOT commit or open a PR yourself.
