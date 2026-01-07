@@ -3,16 +3,19 @@ import { Alert } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import TextField from '../components/TextField';
 import Button from '../components/Button';
+import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function SendNoteScreen({ navigation }: ScreenProps<'SendNote'>) {
   const [note, setNote] = useState('');
+  const { state, updateAppState } = useAppState();
 
   const handleSend = () => {
     if (!note) {
       Alert.alert('Add a note', 'Please enter a short message.');
       return;
     }
+    updateAppState({ shiftNotes: [...state.shiftNotes, note.trim()] });
     Alert.alert('Note sent', 'Operations have received your note.');
     navigation.goBack();
   };

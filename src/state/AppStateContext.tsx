@@ -6,12 +6,22 @@ export interface VehicleInfo {
   depot: string;
 }
 
+export interface ChecklistAnswer {
+  id: string;
+  label: string;
+  status: 'pass' | 'fail' | null;
+  note: string;
+  critical: boolean;
+  sectionTitle: string;
+}
+
 export interface AppState {
   isLoggedIn: boolean;
   declarationAccepted: boolean;
   assignedVehicle: VehicleInfo | null;
   shiftStarted: boolean;
   checklistCompleted: boolean;
+  preStartChecklistAnswers: ChecklistAnswer[];
   odometerReading: string;
   odometerPhoto: string;
   shiftStartTime: Date | null;
@@ -19,6 +29,9 @@ export interface AppState {
   lastFueled?: string | null;
   breakStartedAt?: string | null;
   breakAccumulatedSeconds?: number;
+  shiftNotes: string[];
+  endShiftRubbishRemoved: 'yes' | 'no' | null;
+  endShiftNotes: string;
 }
 
 interface AppStateContextValue {
@@ -35,6 +48,7 @@ const initialState: AppState = {
   assignedVehicle: null,
   shiftStarted: false,
   checklistCompleted: false,
+  preStartChecklistAnswers: [],
   odometerReading: '',
   odometerPhoto: '',
   shiftStartTime: null,
@@ -42,6 +56,9 @@ const initialState: AppState = {
   lastFueled: null,
   breakStartedAt: null,
   breakAccumulatedSeconds: 0,
+  shiftNotes: [],
+  endShiftRubbishRemoved: null,
+  endShiftNotes: '',
 };
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
