@@ -66,6 +66,7 @@ const initialSections: ChecklistSection[] = [
     expanded: false,
     items: [
       { id: 'body-damage', label: 'No visible body damage', status: null, note: '', critical: false },
+      { id: 'vehicle-clean', label: 'Is the vehicle clean?', status: null, note: '', critical: false },
       { id: 'windscreen', label: 'Windscreen intact', status: null, note: '', critical: true },
       { id: 'mirrors', label: 'Mirrors intact and clean', status: null, note: '', critical: false },
     ],
@@ -103,7 +104,21 @@ export default function PreStartChecklistScreen({ navigation }: ScreenProps<'Pre
   const canSubmit = allItemsCompleted && failedItemsHaveNotes;
 
   const submitChecklist = () => {
-    updateAppState({ checklistCompleted: !hasFailedItems });
+    const checklistAnswers = sections.flatMap(section =>
+      section.items.map(item => ({
+        id: item.id,
+        label: item.label,
+        status: item.status,
+        note: item.note,
+        critical: item.critical,
+        sectionTitle: section.title,
+      }))
+    );
+
+    updateAppState({
+      checklistCompleted: !hasFailedItems,
+      preStartChecklistAnswers: checklistAnswers,
+    });
     if (hasCriticalFailures) {
       navigation.navigate('WaitForInstruction');
     } else {
