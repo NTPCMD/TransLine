@@ -1,4 +1,4 @@
-- name: Run Claude Code (edit repo)
+name: Run Claude Code (edit repo)
   uses: anthropics/claude-code-base-action@v0.0.20
   with:
     anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
