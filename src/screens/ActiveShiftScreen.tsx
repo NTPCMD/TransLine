@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import MapLibreGL from '@maplibre/maplibre-react-native';
 import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
 import ScreenContainer from '../components/ScreenContainer';
@@ -10,6 +11,12 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   const { state } = useAppState();
   const [now, setNow] = useState(Date.now());
   const [showMenu, setShowMenu] = useState(false);
+  const cameraRef = useRef<MapLibreGL.Camera | null>(null);
+  const currentZoomRef = useRef(14);
+
+  useEffect(() => {
+    console.log('[ActiveShiftScreen] MapLibre screen mounted');
+  }, []);
 
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
@@ -53,8 +60,27 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
       </View>
 
       <View style={{ padding: 16 }}>
-        <View style={styles.mapPlaceholder}>
-          <Text style={{ color: '#9E9E9E' }}>Map View Placeholder</Text>
+        <View style={styles.mapContainer}>
+          <MapLibreGL.MapView
+            style={styles.map}
+            styleURL={MapLibreGL.StyleURL.Empty}
+          >
+            <MapLibreGL.RasterSource
+              id="osm-tiles"
+              tileUrlTemplates={['https://tile.openstreetmap.org/{z}/{x}/{y}.png']}
+              tileSize={256}
+            >
+              <MapLibreGL.RasterLayer id="osm-raster" sourceID="osm-tiles" />
+            </MapLibreGL.RasterSource>
+            <MapLibreGL.Camera
+              ref={cameraRef}
+              zoomLevel={currentZoomRef.current}
+              centerCoordinate={[151.2093, -33.8688]}
+            />
+          </MapLibreGL.MapView>
+          <View style={styles.mapOverlay}>
+            <Text style={styles.mapOverlayText}>MAP RENDERED</Text>
+          </View>
         </View>
 
         <View style={{ marginTop: 12 }}>
@@ -111,12 +137,28 @@ const styles = StyleSheet.create({
   metricItem: { alignItems: 'center', flex: 1 },
   metricLabel: { color: '#9E9E9E', fontSize: 12 },
   metricValue: { fontWeight: '700', marginTop: 6 },
-  mapPlaceholder: {
+  mapContainer: {
     backgroundColor: '#F2F2F2',
     borderRadius: 12,
     height: 180,
-    alignItems: 'center',
-    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  map: {
+    flex: 1,
+  },
+  mapOverlay: {
+    position: 'absolute',
+    top: 12,
+    left: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+  },
+  mapOverlayText: {
+    color: '#0D47A1',
+    fontWeight: '700',
+    fontSize: 12,
   },
   grid: {
     marginTop: 12,
