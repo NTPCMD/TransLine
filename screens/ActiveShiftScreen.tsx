@@ -4,7 +4,6 @@ import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Clock, MapPin, RefreshCw, AlertTriangle, Coffee, Fuel, MessageSquare, FileText, Menu } from 'lucide-react';
-import MapLibreGL from '@maplibre/maplibre-react-native';
 
 interface ActiveShiftScreenProps {
   shiftStartTime: Date | null;
@@ -37,14 +36,13 @@ export function ActiveShiftScreen({
 }: ActiveShiftScreenProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showMenu, setShowMenu] = useState(false);
-  const cameraRef = useRef<MapLibreGL.Camera | null>(null);
   const watchIdRef = useRef<number | null>(null);
-  const currentZoomRef = useRef(16.5);
-  const hasInitialFixRef = useRef(false);
   const [trackingActive, setTrackingActive] = useState(Boolean(shiftStartTime));
   const [hasLocationFix, setHasLocationFix] = useState(false);
   const [driverCoordinate, setDriverCoordinate] = useState<[number, number] | null>(null);
   const [driverHeading, setDriverHeading] = useState<number | null>(null);
+  const [lastFixTime, setLastFixTime] = useState<Date | null>(null);
+  const [permissionStatus, setPermissionStatus] = useState('Unknown');
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -72,6 +70,7 @@ export function ActiveShiftScreen({
       position => {
         const { latitude, longitude, heading } = position.coords;
         setHasLocationFix(true);
+        setLastFixTime(new Date(position.timestamp));
 
         const lngLat: [number, number] = [longitude, latitude];
         setDriverCoordinate(lngLat);
@@ -80,20 +79,6 @@ export function ActiveShiftScreen({
           setDriverHeading(heading);
         }
 
-        if (!hasInitialFixRef.current) {
-          hasInitialFixRef.current = true;
-          cameraRef.current?.setCamera({
-            centerCoordinate: lngLat,
-            zoomLevel: currentZoomRef.current,
-            animationDuration: 0
-          });
-        } else {
-          cameraRef.current?.setCamera({
-            centerCoordinate: lngLat,
-            zoomLevel: currentZoomRef.current,
-            animationDuration: 800
-          });
-        }
       },
       error => {
         console.warn('Location error', error);
@@ -113,20 +98,40 @@ export function ActiveShiftScreen({
     };
   }, [trackingActive]);
 
-  const handleRecenter = () => {
-    if (!driverCoordinate) return;
-    cameraRef.current?.setCamera({
-      centerCoordinate: driverCoordinate,
-      zoomLevel: currentZoomRef.current,
-      animationDuration: 600
-    });
+  useEffect(() => {
+    if (!navigator.permissions) return;
+    navigator.permissions
+      .query({ name: 'geolocation' as PermissionName })
+      .then(result => setPermissionStatus(result.state))
+      .catch(() => setPermissionStatus('Unknown'));
+  }, []);
+
+  const handleRefreshLocation = () => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      position => {
+        const { latitude, longitude, heading } = position.coords;
+        setHasLocationFix(true);
+        setLastFixTime(new Date(position.timestamp));
+        setDriverCoordinate([longitude, latitude]);
+        if (typeof heading === 'number' && !Number.isNaN(heading)) {
+          setDriverHeading(heading);
+        }
+      },
+      error => {
+        console.warn('Location error', error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 10000
+      }
+    );
   };
 
-  const handleRegionDidChange = (event: any) => {
-    const zoomLevel = event?.properties?.zoomLevel;
-    if (typeof zoomLevel === 'number') {
-      currentZoomRef.current = zoomLevel;
-    }
+  const formatCoordinate = () => {
+    if (!driverCoordinate) return 'Not available';
+    return `${driverCoordinate[1].toFixed(5)}, ${driverCoordinate[0].toFixed(5)}`;
   };
 
   const getShiftDuration = () => {
@@ -231,58 +236,50 @@ export function ActiveShiftScreen({
       </div>
 
       <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
-        <div className="relative bg-[#F2F2F2] rounded-[12px] h-[55vh] min-h-[320px] overflow-hidden">
-          <div className="absolute inset-0">
-            <MapLibreGL.MapView
-              style={{ flex: 1 }}
-              onRegionDidChange={handleRegionDidChange}
-              styleURL={MapLibreGL.StyleURL.Empty}
+        <div className="bg-white rounded-[12px] border border-[#E5E7EB] p-4 shadow-[0_2px_12px_rgba(0,0,0,0.05)]">
+          <p className="font-semibold mb-3">Location status</p>
+          <div className="space-y-2 text-sm">
+            <div className="flex justify-between text-[#6B7280]">
+              <span>Tracking</span>
+              <span className="font-medium text-[#111827]">{trackingActive ? 'Active' : 'Paused'}</span>
+            </div>
+            <div className="flex justify-between text-[#6B7280]">
+              <span>GPS permission</span>
+              <span className="font-medium text-[#111827]">{permissionStatus}</span>
+            </div>
+            <div className="flex justify-between text-[#6B7280]">
+              <span>Last fix</span>
+              <span className="font-medium text-[#111827]">{lastFixTime ? lastFixTime.toLocaleTimeString() : 'Not available'}</span>
+            </div>
+            <div className="flex justify-between text-[#6B7280]">
+              <span>Last coordinates</span>
+              <span className="font-medium text-[#111827]">{formatCoordinate()}</span>
+            </div>
+            <div className="flex justify-between text-[#6B7280]">
+              <span>Heading</span>
+              <span className="font-medium text-[#111827]">{driverHeading !== null ? `${driverHeading.toFixed(0)}°` : 'Not available'}</span>
+            </div>
+            <div className="flex justify-between text-[#6B7280]">
+              <span>Fix status</span>
+              <span className="font-medium text-[#111827]">{hasLocationFix ? 'Fix acquired' : 'Waiting for fix'}</span>
+            </div>
+          </div>
+          <div className="mt-4 flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={() => navigator.geolocation?.getCurrentPosition(() => {}, () => {})}
+              className="w-full border border-[#C62828] text-[#C62828] text-sm px-3 py-2 rounded-full"
             >
-              <MapLibreGL.RasterSource
-                id="osm-tiles"
-                tileUrlTemplates={['https://tile.openstreetmap.org/{z}/{x}/{y}.png']}
-                tileSize={256}
-              >
-                <MapLibreGL.RasterLayer id="osm-raster" sourceID="osm-tiles" />
-              </MapLibreGL.RasterSource>
-              <MapLibreGL.Camera
-                ref={cameraRef}
-                zoomLevel={currentZoomRef.current}
-                centerCoordinate={driverCoordinate ?? [151.2093, -33.8688]}
-                heading={driverHeading ?? 0}
-              />
-              {driverCoordinate ? (
-                <MapLibreGL.PointAnnotation id="driver-location" coordinate={driverCoordinate}>
-                  <View
-                    style={{
-                      width: 16,
-                      height: 16,
-                      borderRadius: 999,
-                      backgroundColor: '#3B82F6',
-                      borderWidth: 2,
-                      borderColor: '#FFFFFF',
-                      shadowColor: '#3B82F6',
-                      shadowOpacity: 0.8,
-                      shadowRadius: 6
-                    }}
-                  />
-                </MapLibreGL.PointAnnotation>
-              ) : null}
-            </MapLibreGL.MapView>
+              Request GPS Permissions
+            </button>
+            <button
+              type="button"
+              onClick={handleRefreshLocation}
+              className="w-full bg-[#0D47A1] text-white text-sm px-3 py-2 rounded-full shadow hover:bg-[#0B3C8C] transition-colors"
+            >
+              Refresh Location
+            </button>
           </div>
-          <div className="absolute top-3 left-3 bg-white/90 text-xs px-3 py-1 rounded-full shadow">
-            {trackingActive ? 'Tracking active' : 'Tracking paused'}
-          </div>
-          <div className="absolute bottom-3 left-3 bg-white/90 text-xs px-3 py-1 rounded-full shadow">
-            {hasLocationFix ? 'Live GPS lock' : 'Waiting for GPS fix'}
-          </div>
-          <button
-            type="button"
-            onClick={handleRecenter}
-            className="absolute bottom-3 right-3 bg-[#0D47A1] text-white text-xs px-3 py-2 rounded-full shadow hover:bg-[#0B3C8C] transition-colors"
-          >
-            Recenter
-          </button>
         </div>
 
         <Button
