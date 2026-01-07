@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import { View } from 'react-native';
 import { Button } from '../components/Button';
 import { Badge } from '../components/Badge';
 import { ScreenHeader } from '../components/ScreenHeader';
 import { Clock, MapPin, RefreshCw, AlertTriangle, Coffee, Fuel, MessageSquare, FileText, Menu } from 'lucide-react';
+import MapLibreGL from '@maplibre/maplibre-react-native';
 
 interface ActiveShiftScreenProps {
   shiftStartTime: Date | null;
@@ -35,6 +37,14 @@ export function ActiveShiftScreen({
 }: ActiveShiftScreenProps) {
   const [currentTime, setCurrentTime] = useState(new Date());
   const [showMenu, setShowMenu] = useState(false);
+  const cameraRef = useRef<MapLibreGL.Camera | null>(null);
+  const watchIdRef = useRef<number | null>(null);
+  const currentZoomRef = useRef(16.5);
+  const hasInitialFixRef = useRef(false);
+  const [trackingActive, setTrackingActive] = useState(Boolean(shiftStartTime));
+  const [hasLocationFix, setHasLocationFix] = useState(false);
+  const [driverCoordinate, setDriverCoordinate] = useState<[number, number] | null>(null);
+  const [driverHeading, setDriverHeading] = useState<number | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -42,6 +52,82 @@ export function ActiveShiftScreen({
     }, 1000);
     return () => clearInterval(timer);
   }, []);
+
+  useEffect(() => {
+    setTrackingActive(Boolean(shiftStartTime));
+  }, [shiftStartTime]);
+
+  useEffect(() => {
+    if (!trackingActive) {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+      return;
+    }
+
+    if (!navigator.geolocation) return;
+
+    watchIdRef.current = navigator.geolocation.watchPosition(
+      position => {
+        const { latitude, longitude, heading } = position.coords;
+        setHasLocationFix(true);
+
+        const lngLat: [number, number] = [longitude, latitude];
+        setDriverCoordinate(lngLat);
+
+        if (typeof heading === 'number' && !Number.isNaN(heading)) {
+          setDriverHeading(heading);
+        }
+
+        if (!hasInitialFixRef.current) {
+          hasInitialFixRef.current = true;
+          cameraRef.current?.setCamera({
+            centerCoordinate: lngLat,
+            zoomLevel: currentZoomRef.current,
+            animationDuration: 0
+          });
+        } else {
+          cameraRef.current?.setCamera({
+            centerCoordinate: lngLat,
+            zoomLevel: currentZoomRef.current,
+            animationDuration: 800
+          });
+        }
+      },
+      error => {
+        console.warn('Location error', error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 1000,
+        timeout: 10000
+      }
+    );
+
+    return () => {
+      if (watchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
+      }
+    };
+  }, [trackingActive]);
+
+  const handleRecenter = () => {
+    if (!driverCoordinate) return;
+    cameraRef.current?.setCamera({
+      centerCoordinate: driverCoordinate,
+      zoomLevel: currentZoomRef.current,
+      animationDuration: 600
+    });
+  };
+
+  const handleRegionDidChange = (event: any) => {
+    const zoomLevel = event?.properties?.zoomLevel;
+    if (typeof zoomLevel === 'number') {
+      currentZoomRef.current = zoomLevel;
+    }
+  };
 
   const getShiftDuration = () => {
     if (!shiftStartTime) return '0h 0m';
@@ -145,11 +231,58 @@ export function ActiveShiftScreen({
       </div>
 
       <div className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
-        <div className="bg-[#F2F2F2] rounded-[12px] aspect-video flex items-center justify-center">
-          <div className="text-center text-[#9E9E9E]">
-            <MapPin size={48} className="mx-auto mb-2" />
-            <p>Map View Placeholder</p>
+        <div className="relative bg-[#F2F2F2] rounded-[12px] h-[55vh] min-h-[320px] overflow-hidden">
+          <div className="absolute inset-0">
+            <MapLibreGL.MapView
+              style={{ flex: 1 }}
+              onRegionDidChange={handleRegionDidChange}
+              styleURL={MapLibreGL.StyleURL.Empty}
+            >
+              <MapLibreGL.RasterSource
+                id="osm-tiles"
+                tileUrlTemplates={['https://tile.openstreetmap.org/{z}/{x}/{y}.png']}
+                tileSize={256}
+              >
+                <MapLibreGL.RasterLayer id="osm-raster" sourceID="osm-tiles" />
+              </MapLibreGL.RasterSource>
+              <MapLibreGL.Camera
+                ref={cameraRef}
+                zoomLevel={currentZoomRef.current}
+                centerCoordinate={driverCoordinate ?? [151.2093, -33.8688]}
+                heading={driverHeading ?? 0}
+              />
+              {driverCoordinate ? (
+                <MapLibreGL.PointAnnotation id="driver-location" coordinate={driverCoordinate}>
+                  <View
+                    style={{
+                      width: 16,
+                      height: 16,
+                      borderRadius: 999,
+                      backgroundColor: '#3B82F6',
+                      borderWidth: 2,
+                      borderColor: '#FFFFFF',
+                      shadowColor: '#3B82F6',
+                      shadowOpacity: 0.8,
+                      shadowRadius: 6
+                    }}
+                  />
+                </MapLibreGL.PointAnnotation>
+              ) : null}
+            </MapLibreGL.MapView>
           </div>
+          <div className="absolute top-3 left-3 bg-white/90 text-xs px-3 py-1 rounded-full shadow">
+            {trackingActive ? 'Tracking active' : 'Tracking paused'}
+          </div>
+          <div className="absolute bottom-3 left-3 bg-white/90 text-xs px-3 py-1 rounded-full shadow">
+            {hasLocationFix ? 'Live GPS lock' : 'Waiting for GPS fix'}
+          </div>
+          <button
+            type="button"
+            onClick={handleRecenter}
+            className="absolute bottom-3 right-3 bg-[#0D47A1] text-white text-xs px-3 py-2 rounded-full shadow hover:bg-[#0B3C8C] transition-colors"
+          >
+            Recenter
+          </button>
         </div>
 
         <Button
