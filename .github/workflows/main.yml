@@ -1,0 +1,27 @@
+name: Claude (base action)
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: write   # allow commits (if you add commit step)
+  issues: read
+
+jobs:
+  claude:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Run Claude Code
+        uses: anthropics/claude-code-base-action@v0.0.14
+        with:
+          prompt: |
+            Read the issue description and implement the requested change.
+            Make edits in the repository.
+            After coding, run tests/build if available.
+            Be concise.
+          allowed_tools: "Bash(git:*),View,GlobTool,GrepTool,BatchTool"
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
