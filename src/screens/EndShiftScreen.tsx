@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View, Pressable } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import InfoCard from '../components/InfoCard';
@@ -8,9 +8,21 @@ import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) {
-  const { createEvent, endShift, state, resetShift, updateAppState } = useAppState();
+  const { closeActiveBreak, createEvent, endShift, state, resetShift, updateAppState } = useAppState();
   const [rubbishRemoved, setRubbishRemoved] = useState<'yes' | 'no' | null>(state.endShiftRubbishRemoved);
   const [endShiftNotes, setEndShiftNotes] = useState(state.endShiftNotes);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (!isSubmitting) {
+        return;
+      }
+      event.preventDefault();
+    });
+
+    return unsubscribe;
+  }, [isSubmitting, navigation]);
 
   const handleRubbishChange = (value: 'yes' | 'no') => {
     setRubbishRemoved(value);
@@ -23,15 +35,42 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
   };
 
   const handleConfirm = async () => {
-    await createEvent('shift_end', { end_shift_notes: endShiftNotes });
-    const ended = await endShift();
-    if (!ended) {
-      Alert.alert('Unable to end shift', 'Please check your connection and try again.');
+    if (isSubmitting) return;
+    if (!state.activeShiftId) {
+      Alert.alert('Unable to end shift', 'No active shift found.');
       return;
     }
-    resetShift();
-    updateAppState({ isLoggedIn: true, declarationAccepted: true });
-    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    setIsSubmitting(true);
+    let shouldReset = true;
+    try {
+      if (state.isOnBreak) {
+        await closeActiveBreak();
+      }
+      const shiftEndResult = await createEvent(
+        'shift_end',
+        { end_shift_notes: endShiftNotes },
+        { queueOnError: false }
+      );
+      if (shiftEndResult.status === 'error') {
+        Alert.alert('Unable to end shift', shiftEndResult.error ?? 'Unable to end shift.');
+        return;
+      }
+      const ended = await endShift();
+      if (!ended.ok) {
+        Alert.alert('Unable to end shift', ended.error ?? 'Unable to end shift.');
+        return;
+      }
+      resetShift();
+      updateAppState({ isLoggedIn: true, declarationAccepted: true });
+      shouldReset = false;
+      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+    } catch (error) {
+      Alert.alert('Unable to end shift', error instanceof Error ? error.message : 'Unable to end shift.');
+    } finally {
+      if (shouldReset) {
+        setIsSubmitting(false);
+      }
+    }
   };
 
   return (
@@ -65,8 +104,8 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
           multiline
         />
       </InfoCard>
-      <Button label="Confirm end" onPress={handleConfirm} />
-      <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
+      <Button label={isSubmitting ? 'Ending...' : 'Confirm end'} onPress={handleConfirm} disabled={isSubmitting} />
+      <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
     </ScreenContainer>
   );
 }
