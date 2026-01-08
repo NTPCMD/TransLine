@@ -13,9 +13,10 @@ const DEFAULT_BREAK_SECONDS = 15 * 60; // 15 minutes default
 type BreakStatus = 'idle' | 'running' | 'paused';
 
 export default function BreakControlScreen({ navigation }: ScreenProps<'BreakControl'>) {
-  const { createEvent, state, updateAppState } = useAppState();
+  const { closeActiveBreak, createEvent, state, updateAppState } = useAppState();
   const [status, setStatus] = useState<BreakStatus>('idle');
   const [secondsElapsed, setSecondsElapsed] = useState(0);
+  const [isProcessing, setIsProcessing] = useState(false);
 
   // Timer effect - only runs when status is "running"
   useEffect(() => {
@@ -37,15 +38,55 @@ export default function BreakControlScreen({ navigation }: ScreenProps<'BreakCon
     return () => clearInterval(id);
   }, [status, state.breakAccumulatedSeconds]);
 
+  useEffect(() => {
+    if (state.isOnBreak && state.breakStartedAt) {
+      setStatus('running');
+      setSecondsElapsed(Math.floor((Date.now() - new Date(state.breakStartedAt).getTime()) / 1000));
+      return;
+    }
+    if (status === 'running') {
+      setStatus('idle');
+      setSecondsElapsed(0);
+    }
+  }, [state.breakStartedAt, state.isOnBreak, status]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', (event) => {
+      if (isProcessing) {
+        event.preventDefault();
+        return;
+      }
+      if (!state.isOnBreak) {
+        return;
+      }
+      event.preventDefault();
+      setIsProcessing(true);
+      closeActiveBreak()
+        .catch(() => undefined)
+        .finally(() => {
+          setIsProcessing(false);
+          navigation.dispatch(event.data.action);
+        });
+    });
+
+    return unsubscribe;
+  }, [closeActiveBreak, isProcessing, navigation, state.isOnBreak]);
+
   const startBreak = async () => {
+    if (isProcessing) return;
     if ((state.breakAccumulatedSeconds ?? 0) >= MAX_BREAK_SECONDS) {
       alert('Maximum break time (30 minutes) already reached for this shift.');
       return;
     }
     setStatus('running');
     setSecondsElapsed(0);
-    updateAppState({ onBreak: true, breakStartedAt: new Date().toISOString() });
-    await createEvent('break_start');
+    updateAppState({ isOnBreak: true, breakStartedAt: new Date().toISOString() });
+    setIsProcessing(true);
+    try {
+      await createEvent('break_start');
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
   const pauseBreak = () => {
@@ -54,22 +95,29 @@ export default function BreakControlScreen({ navigation }: ScreenProps<'BreakCon
     const delta = Math.floor((Date.now() - started) / 1000);
     const newAccum = (state.breakAccumulatedSeconds ?? 0) + delta;
     setStatus('paused');
-    updateAppState({ onBreak: false, breakStartedAt: null, breakAccumulatedSeconds: newAccum });
+    updateAppState({ isOnBreak: false, breakStartedAt: null, breakAccumulatedSeconds: newAccum });
   };
 
   const resumeBreak = () => {
     setStatus('running');
-    updateAppState({ onBreak: true, breakStartedAt: new Date().toISOString() });
+    updateAppState({ isOnBreak: true, breakStartedAt: new Date().toISOString() });
   };
 
   const endBreak = async () => {
+    if (isProcessing) return;
     const totalSeconds = (state.breakAccumulatedSeconds ?? 0) + (status === 'running' ? secondsElapsed : 0);
     if (state.breakStartedAt && status === 'running') {
       pauseBreak();
     }
     setStatus('idle');
     setSecondsElapsed(0);
-    await createEvent('break_end', { duration_seconds: totalSeconds });
+    updateAppState({ isOnBreak: false, breakStartedAt: null, breakAccumulatedSeconds: totalSeconds });
+    setIsProcessing(true);
+    try {
+      await createEvent('break_end', { duration_seconds: totalSeconds });
+    } finally {
+      setIsProcessing(false);
+    }
     navigation.goBack();
   };
 
@@ -95,28 +143,28 @@ export default function BreakControlScreen({ navigation }: ScreenProps<'BreakCon
         {/* Idle state - show Start button */}
         {status === 'idle' && (
           <View style={styles.buttonGroup}>
-            <Button label="Start Break" onPress={startBreak} />
+            <Button label="Start Break" onPress={startBreak} disabled={isProcessing} />
           </View>
         )}
 
         {/* Running state - show Pause and End buttons */}
         {status === 'running' && (
           <View style={styles.buttonGroup}>
-            <Button label="Pause Break" onPress={pauseBreak} />
-            <Button label="End Break" variant="ghost" onPress={endBreak} />
+            <Button label="Pause Break" onPress={pauseBreak} disabled={isProcessing} />
+            <Button label="End Break" variant="ghost" onPress={endBreak} disabled={isProcessing} />
           </View>
         )}
 
         {/* Paused state - show Resume and End buttons */}
         {status === 'paused' && (
           <View style={styles.buttonGroup}>
-            <Button label="Resume Break" onPress={resumeBreak} />
-            <Button label="End Break" variant="ghost" onPress={endBreak} />
+            <Button label="Resume Break" onPress={resumeBreak} disabled={isProcessing} />
+            <Button label="End Break" variant="ghost" onPress={endBreak} disabled={isProcessing} />
           </View>
         )}
 
         <View style={styles.spacer} />
-        <Button label="Back to Shift" variant="ghost" onPress={() => navigation.goBack()} />
+        <Button label="Back to Shift" variant="ghost" onPress={() => navigation.goBack()} disabled={isProcessing} />
       </ScrollView>
     </SafeAreaView>
   );

@@ -28,7 +28,7 @@ export interface AppState {
   odometerReading: string;
   odometerPhoto: string;
   shiftStartTime: Date | null;
-  onBreak: boolean;
+  isOnBreak: boolean;
   lastFueled?: string | null;
   breakStartedAt?: string | null;
   breakAccumulatedSeconds?: number;
@@ -44,8 +44,17 @@ interface AppStateContextValue {
   updateAppState: (updates: Partial<AppState>) => void;
   resetShift: () => void;
   startShift: () => Promise<string | null>;
-  endShift: () => Promise<boolean>;
-  createEvent: (eventType: string, metadata?: Record<string, unknown>) => Promise<'sent' | 'queued'>;
+  endShift: () => Promise<{ ok: boolean; error?: string }>;
+  createEvent: (
+    eventType: string,
+    metadata?: Record<string, unknown>,
+    options?: { queueOnError?: boolean }
+  ) => Promise<{ status: 'sent' | 'queued' | 'error'; error?: string }>;
+  closeActiveBreak: (options?: { queueOnError?: boolean }) => Promise<{
+    closed: boolean;
+    durationSeconds: number;
+    result?: { status: 'sent' | 'queued' | 'error'; error?: string };
+  }>;
 }
 
 const AppStateContext = createContext<AppStateContextValue | undefined>(undefined);
@@ -83,7 +92,7 @@ const initialState: AppState = {
   odometerReading: '',
   odometerPhoto: '',
   shiftStartTime: null,
-  onBreak: false,
+  isOnBreak: false,
   lastFueled: null,
   breakStartedAt: null,
   breakAccumulatedSeconds: 0,
@@ -162,6 +171,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     if (!item.skipEventInsert) {
       const { data, error } = await supabase.from('events').insert(item.event).select('id').single();
       if (error) {
+        console.error('Failed to insert queued event', {
+          eventType: item.event.event_type,
+          shiftId: item.event.shift_id,
+          message: error.message,
+        });
         return false;
       }
       eventId = data?.id ?? eventId;
@@ -171,6 +185,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const payload = eventId ? { ...item.secondary.payload, event_id: eventId } : item.secondary.payload;
       const { error } = await supabase.from(item.secondary.table).insert(payload);
       if (error) {
+        console.error('Failed to insert queued event secondary payload', {
+          eventType: item.event.event_type,
+          shiftId: item.event.shift_id,
+          message: error.message,
+        });
         return false;
       }
     }
@@ -200,7 +219,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [processEventQueue, state.userId]);
 
   const createEvent = useCallback(
-    async (eventType: string, metadata: Record<string, unknown> = {}) => {
+    async (eventType: string, metadata: Record<string, unknown> = {}, options?: { queueOnError?: boolean }) => {
+      const queueOnError = options?.queueOnError ?? true;
       const occurredAt = new Date().toISOString();
       const location = await resolveLocation();
       const vehicleId = state.assignedVehicle?.registration ?? null;
@@ -233,12 +253,16 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
       const { data, error } = await supabase.from('events').insert(baseEvent).select('id').single();
       if (error) {
-        await queueEvent({
-          id: `${Date.now()}-${eventType}`,
-          event: baseEvent,
-          secondary: secondaryTable && secondaryPayload ? { table: secondaryTable, payload: secondaryPayload } : undefined,
-        });
-        return 'queued';
+        console.error('Failed to create event', { eventType, shiftId: state.activeShiftId, message: error.message });
+        if (queueOnError) {
+          await queueEvent({
+            id: `${Date.now()}-${eventType}`,
+            event: baseEvent,
+            secondary: secondaryTable && secondaryPayload ? { table: secondaryTable, payload: secondaryPayload } : undefined,
+          });
+          return { status: 'queued', error: error.message };
+        }
+        return { status: 'error', error: error.message };
       }
 
       const eventId = data?.id ?? null;
@@ -248,18 +272,26 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           .from(secondaryTable)
           .insert(eventId ? { ...secondaryPayload, event_id: eventId } : secondaryPayload);
         if (secondaryError) {
-          await queueEvent({
-            id: `${Date.now()}-${eventType}`,
-            event: baseEvent,
-            skipEventInsert: true,
-            eventId,
-            secondary: { table: secondaryTable, payload: secondaryPayload },
+          console.error('Failed to create event secondary payload', {
+            eventType,
+            shiftId: state.activeShiftId,
+            message: secondaryError.message,
           });
-          return 'queued';
+          if (queueOnError) {
+            await queueEvent({
+              id: `${Date.now()}-${eventType}`,
+              event: baseEvent,
+              skipEventInsert: true,
+              eventId,
+              secondary: { table: secondaryTable, payload: secondaryPayload },
+            });
+            return { status: 'queued', error: secondaryError.message };
+          }
+          return { status: 'error', error: secondaryError.message };
         }
       }
 
-      return 'sent';
+      return { status: 'sent' };
     },
     [processEventQueue, state.activeShiftId, state.assignedVehicle?.registration, state.userId]
   );
@@ -282,6 +314,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       .single();
 
     if (error) {
+      console.error('Failed to start shift', { shiftId: null, message: error.message });
       return null;
     }
 
@@ -293,7 +326,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const endShift = useCallback(async () => {
     if (!state.activeShiftId) {
-      return false;
+      return { ok: false, error: 'No active shift found.' };
     }
 
     const { error } = await supabase
@@ -302,15 +335,34 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       .eq('id', state.activeShiftId);
 
     if (error) {
-      return false;
+      console.error('Failed to end shift', { shiftId: state.activeShiftId, message: error.message });
+      return { ok: false, error: error.message };
     }
 
     setState(prev => ({ ...prev, activeShiftId: null }));
-    return true;
+    return { ok: true };
   }, [state.activeShiftId]);
 
+  const closeActiveBreak = useCallback(
+    async (options?: { queueOnError?: boolean }) => {
+      if (!state.isOnBreak) {
+        return { closed: false, durationSeconds: 0 };
+      }
+
+      const accumulated = state.breakAccumulatedSeconds ?? 0;
+      const started = state.breakStartedAt ? new Date(state.breakStartedAt).getTime() : null;
+      const runningDelta = started ? Math.floor((Date.now() - started) / 1000) : 0;
+      const totalSeconds = accumulated + runningDelta;
+      const result = await createEvent('break_end', { duration_seconds: totalSeconds }, options);
+      updateAppState({ isOnBreak: false, breakStartedAt: null, breakAccumulatedSeconds: totalSeconds });
+
+      return { closed: true, durationSeconds: totalSeconds, result };
+    },
+    [createEvent, state.breakAccumulatedSeconds, state.breakStartedAt, state.isOnBreak, updateAppState]
+  );
+
   return (
-    <AppStateContext.Provider value={{ state, updateAppState, resetShift, startShift, endShift, createEvent }}>
+    <AppStateContext.Provider value={{ state, updateAppState, resetShift, startShift, endShift, createEvent, closeActiveBreak }}>
       {children}
     </AppStateContext.Provider>
   );
