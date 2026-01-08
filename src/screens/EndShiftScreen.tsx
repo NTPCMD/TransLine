@@ -76,7 +76,7 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
   return (
     <ScreenContainer title="End shift" subtitle="Complete your shift and log out">
       <InfoCard title="Summary">
-        <Text style={styles.text}>Vehicle: {state.assignedVehicle?.registration ?? 'Unknown'}</Text>
+        <Text style={styles.text}>Vehicle: {state.vehicleRegistration ?? state.assignedVehicle?.registration ?? 'Unknown'}</Text>
         <Text style={styles.text}>Start time: {state.shiftStartTime ? state.shiftStartTime.toLocaleTimeString() : 'Not set'}</Text>
         <Text style={styles.text}>Odometer: {state.odometerReading || 'Pending'}</Text>
       </InfoCard>
