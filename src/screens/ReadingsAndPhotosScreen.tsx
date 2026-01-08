@@ -12,9 +12,11 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
   const [reading, setReading] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
 
   const handleContinue = async () => {
     setAttemptedSubmit(true);
+    setStartError(null);
     if (!reading.trim() || !photoUri) {
       // Inline errors will show; prevent navigation
       return;
@@ -24,9 +26,13 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       odometerReading: reading,
       odometerPhoto: photoUri,
       shiftStartTime: new Date(),
-      shiftStarted: true,
     });
-    await startShift();
+    const { shiftId, error } = await startShift();
+    if (!shiftId) {
+      setStartError(error ?? 'Unable to start shift.');
+      return;
+    }
+    updateAppState({ shiftStarted: true });
     // After readings, navigate to main drawer home (dashboard)
     navigation.replace('Main');
   };
@@ -49,6 +55,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       {attemptedSubmit && !photoUri ? (
         <Text style={{ color: '#D32F2F' }}>Odometer photo is required.</Text>
       ) : null}
+      {startError ? <Text style={{ color: '#D32F2F' }}>{startError}</Text> : null}
 
       <Button label="Continue" onPress={handleContinue} />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />

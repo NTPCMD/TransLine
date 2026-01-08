@@ -3,16 +3,26 @@ import { StyleSheet, Text, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
+import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
 export default function DriverDeclarationScreen({ navigation }: ScreenProps<'DriverDeclaration'>) {
   const { updateAppState } = useAppState();
 
-  const handleAccept = () => {
+  const handleAccept = async () => {
+    const registration = 'ABC-123';
+    const { data } = await supabase
+      .from('vehicles')
+      .select('id, registration')
+      .eq('registration', registration)
+      .single();
+
     updateAppState({
       declarationAccepted: true,
+      vehicleId: data?.id ?? null,
+      vehicleRegistration: data?.registration ?? registration,
       assignedVehicle: {
-        registration: 'ABC-123',
+        registration: data?.registration ?? registration,
         type: 'Rigid Truck',
         depot: 'Sydney Depot',
       },

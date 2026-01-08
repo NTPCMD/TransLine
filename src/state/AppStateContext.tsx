@@ -22,6 +22,8 @@ export interface AppState {
   isLoggedIn: boolean;
   declarationAccepted: boolean;
   assignedVehicle: VehicleInfo | null;
+  vehicleId: string | null;
+  vehicleRegistration: string | null;
   shiftStarted: boolean;
   checklistCompleted: boolean;
   preStartChecklistAnswers: ChecklistAnswer[];
@@ -43,7 +45,7 @@ interface AppStateContextValue {
   state: AppState;
   updateAppState: (updates: Partial<AppState>) => void;
   resetShift: () => void;
-  startShift: () => Promise<string | null>;
+  startShift: () => Promise<{ shiftId: string | null; error?: string }>;
   endShift: () => Promise<{ ok: boolean; error?: string }>;
   createEvent: (
     eventType: string,
@@ -86,6 +88,8 @@ const initialState: AppState = {
   isLoggedIn: false,
   declarationAccepted: false,
   assignedVehicle: null,
+  vehicleId: null,
+  vehicleRegistration: null,
   shiftStarted: false,
   checklistCompleted: false,
   preStartChecklistAnswers: [],
@@ -132,6 +136,32 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       data.subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    const lookupVehicleFromRegistration = async (registration: string) => {
+      const { data, error } = await supabase
+        .from('vehicles')
+        .select('id, registration')
+        .eq('registration', registration)
+        .single();
+      if (error || !data) {
+        console.warn('Unable to backfill vehicle id from registration', { registration, message: error?.message });
+        return;
+      }
+      setState(prev => ({
+        ...prev,
+        vehicleId: data.id,
+        vehicleRegistration: data.registration,
+      }));
+    };
+
+    const storedVehicleId = state.vehicleId;
+    if (!storedVehicleId) return;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(storedVehicleId);
+    if (!isUuid && storedVehicleId.includes('-')) {
+      void lookupVehicleFromRegistration(storedVehicleId);
+    }
+  }, [state.vehicleId]);
 
   const loadQueuedEvents = async (): Promise<EventQueueItem[]> => {
     const stored = await AsyncStorage.getItem(EVENT_QUEUE_KEY);
@@ -223,7 +253,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const queueOnError = options?.queueOnError ?? true;
       const occurredAt = new Date().toISOString();
       const location = await resolveLocation();
-      const vehicleId = state.assignedVehicle?.registration ?? null;
+      const vehicleId = state.vehicleId;
       const baseEvent = {
         shift_id: state.activeShiftId,
         driver_id: state.userId,
@@ -293,20 +323,23 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
       return { status: 'sent' };
     },
-    [processEventQueue, state.activeShiftId, state.assignedVehicle?.registration, state.userId]
+    [processEventQueue, state.activeShiftId, state.userId, state.vehicleId]
   );
 
   const startShift = useCallback(async () => {
     if (!state.userId) {
-      return null;
+      return { shiftId: null, error: 'User not available.' };
     }
 
-    const vehicleId = state.assignedVehicle?.registration ?? null;
+    if (!state.vehicleId) {
+      return { shiftId: null, error: 'Select a vehicle first' };
+    }
+
     const { data, error } = await supabase
       .from('shifts')
       .insert({
         driver_id: state.userId,
-        vehicle_id: vehicleId,
+        vehicle_id: state.vehicleId,
         status: 'active',
         started_at: new Date().toISOString(),
       })
@@ -315,14 +348,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     if (error) {
       console.error('Failed to start shift', { shiftId: null, message: error.message });
-      return null;
+      return { shiftId: null, error: error.message };
     }
 
     const shiftId = data?.id ?? null;
     setState(prev => ({ ...prev, activeShiftId: shiftId }));
     await createEvent('shift_start', {});
-    return shiftId;
-  }, [createEvent, state.assignedVehicle?.registration, state.userId]);
+    return { shiftId };
+  }, [createEvent, state.userId, state.vehicleId]);
 
   const endShift = useCallback(async () => {
     if (!state.activeShiftId) {

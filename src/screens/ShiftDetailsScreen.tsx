@@ -14,7 +14,7 @@ export default function ShiftDetailsScreen({ navigation }: ScreenProps<'ShiftDet
   return (
     <ScreenContainer title="Shift details" subtitle="Review current shift information">
       <InfoCard title="Vehicle">
-        <Text style={styles.text}>{state.assignedVehicle?.registration ?? 'Not assigned'}</Text>
+        <Text style={styles.text}>{state.vehicleRegistration ?? state.assignedVehicle?.registration ?? 'Not assigned'}</Text>
         <Text style={styles.meta}>{state.assignedVehicle?.type ?? 'Vehicle type pending'}</Text>
         <Text style={styles.meta}>{state.assignedVehicle?.depot ?? 'Depot pending'}</Text>
       </InfoCard>
