@@ -8,14 +8,15 @@ import type { ScreenProps } from '../types/navigation';
 
 export default function SendNoteScreen({ navigation }: ScreenProps<'SendNote'>) {
   const [note, setNote] = useState('');
-  const { state, updateAppState } = useAppState();
+  const { createEvent, state, updateAppState } = useAppState();
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (!note) {
       Alert.alert('Add a note', 'Please enter a short message.');
       return;
     }
     updateAppState({ shiftNotes: [...state.shiftNotes, note.trim()] });
+    await createEvent('note', { note_text: note.trim() });
     Alert.alert('Note sent', 'Operations have received your note.');
     navigation.goBack();
   };

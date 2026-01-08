@@ -4,6 +4,7 @@ import ScreenContainer from '../components/ScreenContainer';
 import TextField from '../components/TextField';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
+import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
 export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
@@ -11,13 +12,39 @@ export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  const handleLogin = () => {
+  const handleAuth = async (mode: 'signin' | 'signup') => {
     if (!email || !password) {
       Alert.alert('Missing details', 'Please provide both an email and password.');
       return;
     }
-    updateAppState({ isLoggedIn: true });
-    navigation.replace('DriverDeclaration');
+
+    const trimmedEmail = email.trim();
+    try {
+      if (mode === 'signin') {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: trimmedEmail,
+          password,
+        });
+        if (error) {
+          Alert.alert('Sign in failed', error.message);
+          return;
+        }
+      } else {
+        const { error } = await supabase.auth.signUp({
+          email: trimmedEmail,
+          password,
+        });
+        if (error) {
+          Alert.alert('Sign up failed', error.message);
+          return;
+        }
+      }
+
+      updateAppState({ isLoggedIn: true });
+      navigation.replace('DriverDeclaration');
+    } catch (error) {
+      Alert.alert('Authentication error', error instanceof Error ? error.message : 'Unable to authenticate.');
+    }
   };
 
   return (
@@ -30,7 +57,8 @@ export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
         placeholder="Enter your password"
         secureTextEntry
       />
-      <Button label="Sign In" onPress={handleLogin} />
+      <Button label="Sign In" onPress={() => handleAuth('signin')} />
+      <Button label="Create account" variant="ghost" onPress={() => handleAuth('signup')} />
       <Text style={styles.helpText}>Use your company credentials to access the app.</Text>
     </ScreenContainer>
   );

@@ -8,20 +8,29 @@ import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function FuelLogScreen({ navigation }: ScreenProps<'FuelLog'>) {
-  const { updateAppState } = useAppState();
+  const { createEvent, updateAppState } = useAppState();
   const [litres, setLitres] = useState('');
+  const [cost, setCost] = useState('');
+  const [odometerKm, setOdometerKm] = useState('');
   const [location, setLocation] = useState('');
   const [receiptUri, setReceiptUri] = useState<string | null>(null);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
 
-  const submitFuel = () => {
+  const submitFuel = async () => {
     setAttemptedSubmit(true);
-    if (!litres || !location || !receiptUri) {
+    if (!litres || !cost || !odometerKm || !location || !receiptUri) {
       return;
     }
 
     // Update last fuelled timestamp in global state
     updateAppState({ lastFueled: new Date().toISOString() });
+    await createEvent('fuel_log', {
+      litres: Number(litres),
+      cost: Number(cost),
+      odometer_km: Number(odometerKm),
+      receipt_urls: [receiptUri],
+      location_name: location,
+    });
 
     Alert.alert('Fuel logged', 'Your fuel entry has been saved.');
     navigation.goBack();
@@ -30,6 +39,14 @@ export default function FuelLogScreen({ navigation }: ScreenProps<'FuelLog'>) {
   return (
     <ScreenContainer title="Fuel log" subtitle="Record fuel stops during your shift">
       <TextField label="Litres" value={litres} onChangeText={setLitres} keyboardType="numeric" placeholder="0" />
+      <TextField label="Cost" value={cost} onChangeText={setCost} keyboardType="numeric" placeholder="$0.00" />
+      <TextField
+        label="Odometer (km)"
+        value={odometerKm}
+        onChangeText={setOdometerKm}
+        keyboardType="numeric"
+        placeholder="0"
+      />
       <TextField label="Location" value={location} onChangeText={setLocation} placeholder="Fuel station" />
 
       <PhotoPicker label="Receipt photo (required)" uri={receiptUri} onChange={setReceiptUri} />
