@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, Text, View, Pressable } from 'react-native';
+import { Alert, StyleSheet, Text, View, Pressable } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import InfoCard from '../components/InfoCard';
 import Button from '../components/Button';
@@ -8,7 +8,7 @@ import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) {
-  const { state, resetShift, updateAppState } = useAppState();
+  const { createEvent, endShift, state, resetShift, updateAppState } = useAppState();
   const [rubbishRemoved, setRubbishRemoved] = useState<'yes' | 'no' | null>(state.endShiftRubbishRemoved);
   const [endShiftNotes, setEndShiftNotes] = useState(state.endShiftNotes);
 
@@ -22,7 +22,13 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
     updateAppState({ endShiftNotes: value });
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
+    await createEvent('shift_end', { end_shift_notes: endShiftNotes });
+    const ended = await endShift();
+    if (!ended) {
+      Alert.alert('Unable to end shift', 'Please check your connection and try again.');
+      return;
+    }
     resetShift();
     updateAppState({ isLoggedIn: true, declarationAccepted: true });
     navigation.reset({ index: 0, routes: [{ name: 'Login' }] });

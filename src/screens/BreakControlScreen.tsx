@@ -13,7 +13,7 @@ const DEFAULT_BREAK_SECONDS = 15 * 60; // 15 minutes default
 type BreakStatus = 'idle' | 'running' | 'paused';
 
 export default function BreakControlScreen({ navigation }: ScreenProps<'BreakControl'>) {
-  const { state, updateAppState } = useAppState();
+  const { createEvent, state, updateAppState } = useAppState();
   const [status, setStatus] = useState<BreakStatus>('idle');
   const [secondsElapsed, setSecondsElapsed] = useState(0);
 
@@ -37,7 +37,7 @@ export default function BreakControlScreen({ navigation }: ScreenProps<'BreakCon
     return () => clearInterval(id);
   }, [status, state.breakAccumulatedSeconds]);
 
-  const startBreak = () => {
+  const startBreak = async () => {
     if ((state.breakAccumulatedSeconds ?? 0) >= MAX_BREAK_SECONDS) {
       alert('Maximum break time (30 minutes) already reached for this shift.');
       return;
@@ -45,6 +45,7 @@ export default function BreakControlScreen({ navigation }: ScreenProps<'BreakCon
     setStatus('running');
     setSecondsElapsed(0);
     updateAppState({ onBreak: true, breakStartedAt: new Date().toISOString() });
+    await createEvent('break_start');
   };
 
   const pauseBreak = () => {
@@ -61,12 +62,14 @@ export default function BreakControlScreen({ navigation }: ScreenProps<'BreakCon
     updateAppState({ onBreak: true, breakStartedAt: new Date().toISOString() });
   };
 
-  const endBreak = () => {
+  const endBreak = async () => {
+    const totalSeconds = (state.breakAccumulatedSeconds ?? 0) + (status === 'running' ? secondsElapsed : 0);
     if (state.breakStartedAt && status === 'running') {
       pauseBreak();
     }
     setStatus('idle');
     setSecondsElapsed(0);
+    await createEvent('break_end', { duration_seconds: totalSeconds });
     navigation.goBack();
   };
 

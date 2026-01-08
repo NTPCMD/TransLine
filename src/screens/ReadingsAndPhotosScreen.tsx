@@ -8,12 +8,12 @@ import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'ReadingsAndPhotos'>) {
-  const { updateAppState } = useAppState();
+  const { startShift, updateAppState } = useAppState();
   const [reading, setReading] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
 
-  const handleContinue = () => {
+  const handleContinue = async () => {
     setAttemptedSubmit(true);
     if (!reading.trim() || !photoUri) {
       // Inline errors will show; prevent navigation
@@ -26,6 +26,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       shiftStartTime: new Date(),
       shiftStarted: true,
     });
+    await startShift();
     // After readings, navigate to main drawer home (dashboard)
     navigation.replace('Main');
   };
