@@ -2,6 +2,7 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
+import { useDriver } from './DriverContext';
 
 export interface VehicleInfo {
   registration: string;
@@ -38,6 +39,8 @@ export interface AppState {
   endShiftRubbishRemoved: 'yes' | 'no' | null;
   endShiftNotes: string;
   userId: string | null;
+  // drivers.id (driver record primary key) resolved from auth user
+  driverRecordId: string | null;
   activeShiftId: string | null;
 }
 
@@ -104,6 +107,7 @@ const initialState: AppState = {
   endShiftRubbishRemoved: null,
   endShiftNotes: '',
   userId: null,
+  driverRecordId: null,
   activeShiftId: null,
 };
 
@@ -122,19 +126,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       userId: prev.userId,
     }));
   };
+const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = useDriver();
 
   useEffect(() => {
-    const { data } = supabase.auth.onAuthStateChange((_event, session) => {
-      setState(prev => ({
-        ...prev,
-        userId: session?.user?.id ?? null,
-        isLoggedIn: Boolean(session?.user),
-      }));
-    });
-
-    return () => {
-      data.subscription.unsubscribe();
-    };
+    setState(prev => ({
+      ...prev,
+      userId: authUserId,
+      isLoggedIn: Boolean(authUserId),
+      driverRecordId: currentDriver?.id ?? null,
+      vehicleId: currentVehicle?.id ?? prev.vehicleId,
+      assignedVehicle: currentVehicle
+        ? { registration: currentVehicle.registration ?? null, type: currentVehicle.type ?? null, depot: currentVehicle.depot ?? null }
+        : prev.assignedVehicle,
+      vehicleRegistration: currentVehicle?.registration ?? prev.vehicleRegistration,
+    }));
+  }, [authUserId, currentDriver, currentVehicle
   }, []);
 
   useEffect(() => {
@@ -253,7 +259,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const queueOnError = options?.queueOnError ?? true;
       const occurredAt = new Date().toISOString();
       const location = await resolveLocation();
-      const vehicleId = state.vehicleId;
+      const vehicleId = sdriverRecordId ?? state.tate.vehicleId;
       const baseEvent = {
         shift_id: state.activeShiftId,
         driver_id: state.userId,
@@ -272,7 +278,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const secondaryPayload = secondaryTable
         ? {
             shift_id: state.activeShiftId,
-            driver_id: state.userId,
+            driver_id: state.driverRecordId ?? state.userId,
             vehicle_id: vehicleId,
             occurred_at: occurredAt,
             ...metadata,
@@ -327,21 +333,43 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   );
 
   const startShift = useCallback(async () => {
-    if (!state.userId) {
+    if (!state.driverRecordId && !state.userId) {
       return { shiftId: null, error: 'User not available.' };
     }
 
     if (!state.vehicleId) {
-      return { shiftId: null, error: 'Select a vehicle first' };
+      return { shiftId: null, error: 'No vehicle assigned. Contact admin.' };
+    }
+
+    // Upload odometer photo if necessary
+    let odometerPhotoUrl: string | null = null;
+    try {
+      if (state.odometerPhoto && (state.odometerPhoto.startsWith('file:') || state.odometerPhoto.startsWith('data:'))) {
+        const resp = await fetch(state.odometerPhoto);
+        const blob = await resp.blob();
+        const ext = state.odometerPhoto.split('.').pop() ?? 'jpg';
+        const key = `odometer/${(state.driverRecordId ?? state.userId) as string}_${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage.from('odometer-photos').upload(key, blob);
+        if (uploadErr) {
+          console.warn('Failed to upload odometer photo', { message: uploadErr.message });
+        } else {
+          const { data: publicData } = supabase.storage.from('odometer-photos').getPublicUrl(key);
+          odometerPhotoUrl = publicData?.publicUrl ?? null;
+        }
+      }
+    } catch (e) {
+      console.warn('Exception while uploading odometer photo', e);
     }
 
     const { data, error } = await supabase
       .from('shifts')
       .insert({
-        driver_id: state.userId,
+        driver_id: state.driverRecordId ?? state.userId,
         vehicle_id: state.vehicleId,
         status: 'active',
         started_at: new Date().toISOString(),
+        odometer_reading: state.odometerReading ? Number(state.odometerReading) : null,
+        odometer_photo_url: odometerPhotoUrl,
       })
       .select('id')
       .single();

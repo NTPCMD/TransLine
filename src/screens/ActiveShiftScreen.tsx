@@ -5,10 +5,12 @@ import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
 import ScreenContainer from '../components/ScreenContainer';
 import { useAppState } from '../state/AppStateContext';
+import { useDriver } from '../state/DriverContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShift'>) {
   const { state } = useAppState();
+  const { currentDriver: driver, currentVehicle: assigned } = useDriver();
   const [now, setNow] = useState(Date.now());
   const [showMenu, setShowMenu] = useState(false);
   const [hasLocationFix, setHasLocationFix] = useState(false);
@@ -118,7 +120,12 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
       <View style={styles.banner}>
         <View style={styles.bannerLeft}>
           <View style={styles.dot} />
-          <Text style={styles.bannerText}>ON SHIFT</Text>
+          <View>
+            <Text style={styles.bannerText}>ON SHIFT</Text>
+            <Text style={{ color: '#fff', fontSize: 12 }}>
+              {driver?.name ?? 'Driver'} • {state.vehicleRegistration ?? assigned?.registration ?? 'No vehicle'}
+            </Text>
+          </View>
         </View>
         <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.menuButton}>
           <Text style={{ color: '#fff' }}>Menu</Text>
