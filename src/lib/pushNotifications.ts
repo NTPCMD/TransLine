@@ -54,9 +54,9 @@ class PushNotificationManager {
       }
 
       // Get Expo push token
-      const tokenData = await Notifications.getExpoPushTokenAsync({
-        projectId: 'your-project-id', // This should be configured in app.json
-      });
+      // Note: projectId should match the 'extra.eas.projectId' in app.json
+      // For now, we'll let Expo infer it from the app configuration
+      const tokenData = await Notifications.getExpoPushTokenAsync();
 
       const token = tokenData.data;
 

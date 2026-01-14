@@ -46,16 +46,10 @@ export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
       updateAppState({ isLoggedIn: true });
       
       // Register for push notifications after successful login
-      setTimeout(async () => {
-        try {
-          const pushToken = await pushNotificationManager.registerForPushNotifications();
-          if (pushToken && currentDriver?.id) {
-            await pushNotificationManager.savePushToken(currentDriver.id, pushToken);
-          }
-        } catch (error) {
-          console.error('Failed to register push notifications:', error);
-        }
-      }, 1000); // Small delay to ensure driver context is loaded
+      // Note: Token will be saved to database when driver context is available
+      pushNotificationManager.registerForPushNotifications().catch((error) => {
+        console.error('Failed to register push notifications:', error);
+      });
       
       navigation.replace('DriverDeclaration');
     } catch (error) {

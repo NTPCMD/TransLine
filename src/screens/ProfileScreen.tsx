@@ -34,7 +34,22 @@ export default function ProfileScreen({ navigation }: ScreenProps<'Profile'>) {
   useEffect(() => {
     loadDriverInfo();
     loadSettings();
+    registerPushToken();
   }, [currentDriver, authUserId]);
+
+  const registerPushToken = async () => {
+    if (!currentDriver?.id) return;
+    
+    try {
+      const storedToken = await pushNotificationManager.getStoredToken();
+      if (storedToken && storedToken !== 'denied') {
+        // Save token to database if we have one
+        await pushNotificationManager.savePushToken(currentDriver.id, storedToken);
+      }
+    } catch (error) {
+      console.error('Failed to register push token:', error);
+    }
+  };
 
   const loadDriverInfo = async () => {
     if (!authUserId) return;
@@ -222,7 +237,7 @@ export default function ProfileScreen({ navigation }: ScreenProps<'Profile'>) {
               <Text style={styles.settingLabel}>Location Tracking</Text>
               <Switch
                 value={locationEnabled}
-                onValueChange={setLocationEnabled}
+                disabled={true}
                 trackColor={{ false: '#D1D5DB', true: '#FCA5A5' }}
                 thumbColor={locationEnabled ? '#C62828' : '#F3F4F6'}
               />
