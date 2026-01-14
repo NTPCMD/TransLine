@@ -315,9 +315,9 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
             heading: location?.coords.heading ?? null,
             metadata,
           });
-          return { status: 'queued', error: 'Device is offline' };
+          return { status: 'queued' as const, error: 'Device is offline' };
         }
-        return { status: 'error', error: 'Device is offline' };
+        return { status: 'error' as const, error: 'Device is offline' };
       }
 
       await processEventQueue();
@@ -336,9 +336,9 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
             heading: location?.coords.heading ?? null,
             metadata,
           });
-          return { status: 'queued', error: error.message };
+          return { status: 'queued' as const, error: error.message };
         }
-        return { status: 'error', error: error.message };
+        return { status: 'error' as const, error: error.message };
       }
 
       const eventId = data?.id ?? null;
@@ -362,13 +362,13 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
               eventId,
               secondary: { table: secondaryTable, payload: secondaryPayload },
             });
-            return { status: 'queued', error: secondaryError.message };
+            return { status: 'queued' as const, error: secondaryError.message };
           }
-          return { status: 'error', error: secondaryError.message };
+          return { status: 'error' as const, error: secondaryError.message };
         }
       }
 
-      return { status: 'sent' };
+      return { status: 'sent' as const };
     },
     [processEventQueue, state.activeShiftId, state.userId, state.vehicleId, state.driverRecordId]
   );
