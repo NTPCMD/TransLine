@@ -177,7 +177,7 @@ export default function ProfileScreen({ navigation }: ScreenProps<'Profile'>) {
         {/* Driver Information */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Driver Information</Text>
-          <InfoCard style={styles.infoCard}>
+          <InfoCard title="Details">
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Name:</Text>
               <Text style={styles.infoValue}>{currentDriver?.name ?? 'N/A'}</Text>
@@ -303,9 +303,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#1F2937',
     marginBottom: 12,
-  },
-  infoCard: {
-    padding: 16,
   },
   infoRow: {
     flexDirection: 'row',

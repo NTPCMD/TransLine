@@ -8,9 +8,9 @@ import { offlineQueue } from '../lib/offlineQueue';
 import { locationTracker } from '../lib/locationTracking';
 
 export interface VehicleInfo {
-  registration: string;
-  type: string;
-  depot: string;
+  registration: string | null;
+  type: string | null;
+  depot: string | null;
 }
 
 export interface ChecklistAnswer {
