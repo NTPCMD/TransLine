@@ -182,7 +182,7 @@ export default function PreStartChecklistScreen({ navigation }: ScreenProps<'Pre
       </ScrollView>
 
       <View style={styles.footer}>
-        <Button label="Save Draft" variant="outline" onPress={() => navigation.goBack()} />
+        <Button label="Save Draft" variant="ghost" onPress={() => navigation.goBack()} />
         <Button label="Submit Checklist" onPress={submitChecklist} disabled={!canSubmit} />
       </View>
     </ScreenContainer>

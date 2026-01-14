@@ -34,7 +34,7 @@ export default function PhotoPicker({ uri, onChange, label }: PhotoPickerProps) 
         ? await ImagePicker.launchCameraAsync({ quality: 0.6 })
         : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
 
-      if (!result.cancelled) {
+      if (!result.canceled) {
         // @ts-ignore - expo types sometimes use `uri` or `assets`
         const pickedUri = result.uri ?? (result.assets && result.assets[0]?.uri) ?? null;
         if (pickedUri) onChange(pickedUri);

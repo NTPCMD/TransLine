@@ -8,6 +8,7 @@ export type RootStackParamList = {
   PreStartChecklist: undefined;
   WaitForInstruction: undefined;
   ReadingsAndPhotos: undefined;
+  Main: undefined;
   ActiveShift: undefined;
   ShiftDetails: undefined;
   BreakControl: undefined;
