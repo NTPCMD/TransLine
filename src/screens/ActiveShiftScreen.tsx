@@ -4,6 +4,7 @@ import * as Location from 'expo-location';
 import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
 import ScreenContainer from '../components/ScreenContainer';
+import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import { useAppState } from '../state/AppStateContext';
 import { useDriver } from '../state/DriverContext';
 import type { ScreenProps } from '../types/navigation';
@@ -116,6 +117,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
 
   return (
     <ScreenContainer>
+      <NetworkStatusBanner />
       {/* Top banner */}
       <View style={styles.banner}>
         <View style={styles.bannerLeft}>
@@ -196,6 +198,14 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
           <Button label="Fuel Log" variant="ghost" onPress={() => navigation.navigate('FuelLog')} />
           <Button label="Send Note" variant="ghost" onPress={() => navigation.navigate('SendNote')} />
           <Button label="Shift Details" variant="ghost" onPress={() => navigation.navigate('ShiftDetails')} />
+        </View>
+
+        <View style={{ marginTop: 12 }}>
+          <Button 
+            label={`Offline Queue ${state.queuedEventsCount > 0 ? `(${state.queuedEventsCount})` : ''}`} 
+            variant="ghost" 
+            onPress={() => navigation.navigate('OfflineQueue')} 
+          />
         </View>
 
         <View style={{ marginTop: 20 }}>

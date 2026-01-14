@@ -21,6 +21,7 @@ export type RootStackParamList = {
   OperationsAlerts: undefined;
   ComponentsLibrary: undefined;
   VehicleMaintenanceLog: undefined;
+  OfflineQueue: undefined;
 };
 
 export type ScreenProps<T extends keyof RootStackParamList> = NativeStackScreenProps<

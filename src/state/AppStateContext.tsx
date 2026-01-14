@@ -3,6 +3,8 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { useDriver } from './DriverContext';
+import { networkMonitor } from '../lib/networkMonitor';
+import { offlineQueue } from '../lib/offlineQueue';
 
 export interface VehicleInfo {
   registration: string;
@@ -42,6 +44,7 @@ export interface AppState {
   // drivers.id (driver record primary key) resolved from auth user
   driverRecordId: string | null;
   activeShiftId: string | null;
+  queuedEventsCount: number;
 }
 
 interface AppStateContextValue {
@@ -109,6 +112,7 @@ const initialState: AppState = {
   userId: null,
   driverRecordId: null,
   activeShiftId: null,
+  queuedEventsCount: 0,
 };
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
@@ -124,9 +128,21 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       isLoggedIn: prev.isLoggedIn,
       declarationAccepted: prev.declarationAccepted,
       userId: prev.userId,
+      queuedEventsCount: prev.queuedEventsCount,
     }));
   };
 const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = useDriver();
+
+  // Subscribe to offline queue changes
+  useEffect(() => {
+    const unsubscribe = offlineQueue.subscribe((queue) => {
+      setState(prev => ({ ...prev, queuedEventsCount: queue.length }));
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     setState(prev => ({
@@ -284,20 +300,45 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
           }
         : null;
 
+      // Check network connectivity
+      const isOnline = await networkMonitor.isOnline();
+      
+      // If offline, queue immediately
+      if (!isOnline) {
+        if (queueOnError) {
+          await offlineQueue.addEvent(eventType, {
+            shift_id: state.activeShiftId,
+            driver_id: state.userId,
+            vehicle_id: vehicleId,
+            lat: location?.coords.latitude ?? null,
+            lng: location?.coords.longitude ?? null,
+            heading: location?.coords.heading ?? null,
+            metadata,
+          });
+          return { status: 'queued' as const, error: 'Device is offline' };
+        }
+        return { status: 'error' as const, error: 'Device is offline' };
+      }
+
       await processEventQueue();
 
       const { data, error } = await supabase.from('events').insert(baseEvent).select('id').single();
       if (error) {
         console.error('Failed to create event', { eventType, shiftId: state.activeShiftId, message: error.message });
         if (queueOnError) {
-          await queueEvent({
-            id: `${Date.now()}-${eventType}`,
-            event: baseEvent,
-            secondary: secondaryTable && secondaryPayload ? { table: secondaryTable, payload: secondaryPayload } : undefined,
+          // Use new offline queue instead of old queue
+          await offlineQueue.addEvent(eventType, {
+            shift_id: state.activeShiftId,
+            driver_id: state.userId,
+            vehicle_id: vehicleId,
+            lat: location?.coords.latitude ?? null,
+            lng: location?.coords.longitude ?? null,
+            heading: location?.coords.heading ?? null,
+            metadata,
           });
-          return { status: 'queued', error: error.message };
+          return { status: 'queued' as const, error: error.message };
         }
-        return { status: 'error', error: error.message };
+        return { status: 'error' as const, error: error.message };
       }
 
       const eventId = data?.id ?? null;
@@ -313,6 +354,7 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
             message: secondaryError.message,
           });
           if (queueOnError) {
+            // For secondary errors, we still need to use the old queueEvent to handle the eventId
             await queueEvent({
               id: `${Date.now()}-${eventType}`,
               event: baseEvent,
@@ -320,15 +362,15 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
               eventId,
               secondary: { table: secondaryTable, payload: secondaryPayload },
             });
-            return { status: 'queued', error: secondaryError.message };
+            return { status: 'queued' as const, error: secondaryError.message };
           }
-          return { status: 'error', error: secondaryError.message };
+          return { status: 'error' as const, error: secondaryError.message };
         }
       }
 
-      return { status: 'sent' };
+      return { status: 'sent' as const };
     },
-    [processEventQueue, state.activeShiftId, state.userId, state.vehicleId]
+    [processEventQueue, state.activeShiftId, state.userId, state.vehicleId, state.driverRecordId]
   );
 
   const startShift = useCallback(async () => {
