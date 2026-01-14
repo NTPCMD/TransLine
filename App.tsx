@@ -27,6 +27,7 @@ import AnnouncementsScreen from './src/screens/AnnouncementsScreen';
 import OperationsAlertsScreen from './src/screens/OperationsAlertsScreen';
 import ComponentsLibraryScreen from './src/screens/ComponentsLibraryScreen';
 import VehicleMaintenanceLogScreen from './src/screens/VehicleMaintenanceLogScreen';
+import OfflineQueueScreen from './src/screens/OfflineQueueScreen';
 
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
@@ -73,6 +74,7 @@ export default function App() {
             <Stack.Screen name="OperationsAlerts" component={OperationsAlertsScreen} />
             <Stack.Screen name="ComponentsLibrary" component={ComponentsLibraryScreen} />
             <Stack.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen} />
+            <Stack.Screen name="OfflineQueue" component={OfflineQueueScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </AppStateProvider>
