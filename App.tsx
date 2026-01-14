@@ -43,6 +43,7 @@ function MainDrawer() {
       <Drawer.Screen name="MedicalAbsence" component={require('./src/screens/MedicalAbsenceScreen').default} />
       <Drawer.Screen name="Announcements" component={require('./src/screens/AnnouncementsScreen').default} />
       <Drawer.Screen name="VehicleMaintenanceLog" component={require('./src/screens/VehicleMaintenanceLogScreen').default} />
+      <Drawer.Screen name="OfflineQueue" component={OfflineQueueScreen} options={{ title: 'Offline Queue' }} />
     </Drawer.Navigator>
   );
 }

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Alert, StyleSheet, Text, View, Pressable } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import InfoCard from '../components/InfoCard';
+import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import Button from '../components/Button';
 import TextField from '../components/TextField';
 import PhotoPicker from '../components/PhotoPicker';
@@ -142,6 +143,7 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
 
   return (
     <ScreenContainer title="End shift" subtitle="Complete your shift and log out">
+      <NetworkStatusBanner />
       <InfoCard title="Summary">
         <Text style={styles.text}>Vehicle: {state.vehicleRegistration ?? state.assignedVehicle?.registration ?? 'Unknown'}</Text>
         <Text style={styles.text}>Start time: {state.shiftStartTime ? state.shiftStartTime.toLocaleTimeString() : 'Not set'}</Text>
