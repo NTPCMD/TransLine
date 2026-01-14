@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
-import { DrawerNavigationProp } from '@react-navigation/drawer';
 import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
 import ScreenContainer from '../components/ScreenContainer';

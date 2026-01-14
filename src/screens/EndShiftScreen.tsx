@@ -38,12 +38,26 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
     updateAppState({ endShiftNotes: value });
   };
 
+  const isFormValid = () => {
+    return (
+      endOdometerReading.trim() !== '' &&
+      !isNaN(Number(endOdometerReading)) &&
+      endOdometerPhoto !== null &&
+      rubbishRemoved !== null
+    );
+  };
+
   const handleConfirm = async () => {
     if (isSubmitting) return;
     
     // Validation
     if (!endOdometerReading.trim()) {
       Alert.alert('Missing Information', 'Please enter the final odometer reading.');
+      return;
+    }
+    const odometerValue = Number(endOdometerReading);
+    if (isNaN(odometerValue)) {
+      Alert.alert('Invalid Input', 'Please enter a valid numeric odometer reading.');
       return;
     }
     if (!endOdometerPhoto) {
@@ -95,7 +109,7 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
         'shift_end',
         { 
           end_shift_notes: endShiftNotes,
-          end_odometer_reading: Number(endOdometerReading),
+          end_odometer_reading: odometerValue,
           end_odometer_photo_url: endOdometerPhotoUrl,
           rubbish_removed: rubbishRemoved === 'yes'
         },
@@ -177,7 +191,7 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
       <Button 
         label={isSubmitting ? 'Ending...' : 'Confirm end'} 
         onPress={handleConfirm} 
-        disabled={isSubmitting || !endOdometerReading.trim() || !endOdometerPhoto || rubbishRemoved === null} 
+        disabled={isSubmitting || !isFormValid()} 
       />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
     </ScreenContainer>
