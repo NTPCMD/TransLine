@@ -5,6 +5,7 @@ import { supabase } from '../lib/supabase';
 import { useDriver } from './DriverContext';
 import { networkMonitor } from '../lib/networkMonitor';
 import { offlineQueue } from '../lib/offlineQueue';
+import { locationTracker } from '../lib/locationTracking';
 
 export interface VehicleInfo {
   registration: string;
@@ -423,6 +424,12 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
     const shiftId = data?.id ?? null;
     setState(prev => ({ ...prev, activeShiftId: shiftId }));
     await createEvent('shift_start', {});
+    
+    // Start location tracking
+    if (shiftId) {
+      await locationTracker.startTracking(shiftId);
+    }
+    
     return { shiftId };
   }, [createEvent, state.userId, state.vehicleId]);
 
@@ -430,6 +437,9 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
     if (!state.activeShiftId) {
       return { ok: false, error: 'No active shift found.' };
     }
+
+    // Stop location tracking first
+    locationTracker.stopTracking();
 
     const { error } = await supabase
       .from('shifts')

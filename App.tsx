@@ -28,6 +28,8 @@ import OperationsAlertsScreen from './src/screens/OperationsAlertsScreen';
 import ComponentsLibraryScreen from './src/screens/ComponentsLibraryScreen';
 import VehicleMaintenanceLogScreen from './src/screens/VehicleMaintenanceLogScreen';
 import OfflineQueueScreen from './src/screens/OfflineQueueScreen';
+import ProfileScreen from './src/screens/ProfileScreen';
+import ShiftHistoryScreen from './src/screens/ShiftHistoryScreen';
 
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
@@ -44,6 +46,8 @@ function MainDrawer() {
       <Drawer.Screen name="Announcements" component={require('./src/screens/AnnouncementsScreen').default} />
       <Drawer.Screen name="VehicleMaintenanceLog" component={require('./src/screens/VehicleMaintenanceLogScreen').default} />
       <Drawer.Screen name="OfflineQueue" component={OfflineQueueScreen} options={{ title: 'Offline Queue' }} />
+      <Drawer.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
+      <Drawer.Screen name="ShiftHistory" component={ShiftHistoryScreen} options={{ title: 'Shift History' }} />
     </Drawer.Navigator>
   );
 }
@@ -76,6 +80,8 @@ export default function App() {
             <Stack.Screen name="ComponentsLibrary" component={ComponentsLibraryScreen} />
             <Stack.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen} />
             <Stack.Screen name="OfflineQueue" component={OfflineQueueScreen} />
+            <Stack.Screen name="Profile" component={ProfileScreen} />
+            <Stack.Screen name="ShiftHistory" component={ShiftHistoryScreen} />
           </Stack.Navigator>
         </NavigationContainer>
       </AppStateProvider>
