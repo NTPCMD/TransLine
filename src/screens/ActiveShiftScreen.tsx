@@ -17,7 +17,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   const [driverCoordinate, setDriverCoordinate] = useState<[number, number] | null>(null);
   const [driverHeading, setDriverHeading] = useState<number | null>(null);
   const [lastFixTime, setLastFixTime] = useState<Date | null>(null);
-  const [permissionStatus, setPermissionStatus] = useState<Location.PermissionStatus>('undetermined');
+  const [permissionStatus, setPermissionStatus] = useState<Location.PermissionStatus>(Location.PermissionStatus.UNDETERMINED);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const trackingActive = Boolean(state.shiftStartTime);
 
@@ -43,7 +43,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
 
   const startLocationWatch = async () => {
     const status = await updatePermissionStatus();
-    if (status !== 'granted' || watchRef.current) return;
+    if (status !== Location.PermissionStatus.GRANTED || watchRef.current) return;
     watchRef.current = await Location.watchPositionAsync(
       {
         accuracy: Location.Accuracy.Highest,
@@ -76,14 +76,14 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   const handleRequestPermissions = async () => {
     const { status } = await Location.requestForegroundPermissionsAsync();
     setPermissionStatus(status);
-    if (status === 'granted' && trackingActive) {
+    if (status === Location.PermissionStatus.GRANTED && trackingActive) {
       await startLocationWatch();
     }
   };
 
   const handleRefreshLocation = async () => {
     const status = await updatePermissionStatus();
-    if (status !== 'granted') return;
+    if (status !== Location.PermissionStatus.GRANTED) return;
     const location = await Location.getCurrentPositionAsync({
       accuracy: Location.Accuracy.Highest,
     });
@@ -101,8 +101,8 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   };
 
   const formatPermission = (status: Location.PermissionStatus) => {
-    if (status === 'granted') return 'Granted';
-    if (status === 'denied') return 'Denied';
+    if (status === Location.PermissionStatus.GRANTED) return 'Granted';
+    if (status === Location.PermissionStatus.DENIED) return 'Denied';
     return 'Not requested';
   };
 
@@ -127,7 +127,15 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
             </Text>
           </View>
         </View>
-        <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.menuButton}>
+        <TouchableOpacity 
+          onPress={() => {
+            // Type guard to check if navigation has openDrawer method
+            if ('openDrawer' in navigation && typeof navigation.openDrawer === 'function') {
+              navigation.openDrawer();
+            }
+          }} 
+          style={styles.menuButton}
+        >
           <Text style={{ color: '#fff' }}>Menu</Text>
         </TouchableOpacity>
       </View>
@@ -184,10 +192,10 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
         </View>
 
         <View style={styles.grid}>
-          <Button label="Break" variant="outline" onPress={() => navigation.navigate('BreakControl')} />
-          <Button label="Fuel Log" variant="outline" onPress={() => navigation.navigate('FuelLog')} />
-          <Button label="Send Note" variant="outline" onPress={() => navigation.navigate('SendNote')} />
-          <Button label="Shift Details" variant="outline" onPress={() => navigation.navigate('ShiftDetails')} />
+          <Button label="Break" variant="ghost" onPress={() => navigation.navigate('BreakControl')} />
+          <Button label="Fuel Log" variant="ghost" onPress={() => navigation.navigate('FuelLog')} />
+          <Button label="Send Note" variant="ghost" onPress={() => navigation.navigate('SendNote')} />
+          <Button label="Shift Details" variant="ghost" onPress={() => navigation.navigate('ShiftDetails')} />
         </View>
 
         <View style={{ marginTop: 20 }}>

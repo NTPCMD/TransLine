@@ -140,8 +140,7 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
         : prev.assignedVehicle,
       vehicleRegistration: currentVehicle?.registration ?? prev.vehicleRegistration,
     }));
-  }, [authUserId, currentDriver, currentVehicle
-  }, []);
+  }, [authUserId, currentDriver, currentVehicle]);
 
   useEffect(() => {
     const lookupVehicleFromRegistration = async (registration: string) => {
@@ -259,7 +258,7 @@ const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = us
       const queueOnError = options?.queueOnError ?? true;
       const occurredAt = new Date().toISOString();
       const location = await resolveLocation();
-      const vehicleId = sdriverRecordId ?? state.tate.vehicleId;
+      const vehicleId = state.driverRecordId ?? state.vehicleId;
       const baseEvent = {
         shift_id: state.activeShiftId,
         driver_id: state.userId,
