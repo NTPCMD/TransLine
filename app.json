@@ -17,7 +17,18 @@
     "plugins": [
       [
         "@react-native-async-storage/async-storage"
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./Transline (2).png",
+          "color": "#C62828"
+        }
       ]
-    ]
+    ],
+    "notification": {
+      "icon": "./Transline (2).png",
+      "color": "#C62828"
+    }
   }
 }
