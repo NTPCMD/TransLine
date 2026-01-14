@@ -14,6 +14,18 @@ android/.gradle
 android/.idea
 android/app/build/
 
+# EAS Build
+*.jks
+*.p8
+*.p12
+*.key
+*.mobileprovision
+.easignore
+
+# Environment variables
+.env.local
+.env.production
+
 # Misc
 .vscode/
 .env
