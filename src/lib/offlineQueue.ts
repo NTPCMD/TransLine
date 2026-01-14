@@ -110,7 +110,7 @@ class OfflineQueue {
    */
   async addEvent(eventType: string, payload: any): Promise<void> {
     const event: QueuedEvent = {
-      id: `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
       timestamp: new Date().toISOString(),
       eventType,
       payload,
@@ -157,9 +157,10 @@ class OfflineQueue {
         continue;
       }
 
-      // Update status to syncing
+      // Update status to syncing (in memory only, will save at end)
       event.status = 'syncing';
-      await this.saveQueue();
+      // Notify UI of status change
+      this.notifySubscribers();
 
       try {
         // Insert event into Supabase
@@ -198,15 +199,11 @@ class OfflineQueue {
         
         // Keep in queue
         remainingQueue.push(event);
-
-        // Exponential backoff delay before next retry
-        await new Promise(resolve => 
-          setTimeout(resolve, INITIAL_RETRY_DELAY * Math.pow(2, event.retryCount - 1))
-        );
       }
     }
 
     this.queue = remainingQueue;
+    // Save once at the end instead of after each event
     await this.saveQueue();
     
     this.isSyncing = false;
