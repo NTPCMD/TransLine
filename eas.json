@@ -1,46 +1,12 @@
 {
-  "cli": {
-    "version": ">= 5.0.0"
-  },
   "build": {
-    "development": {
-      "developmentClient": true,
-      "distribution": "internal",
-      "ios": {
-        "simulator": true
-      }
+    "production": {
+      "ios": { "distribution": "store" },
+      "android": { "buildType": "app-bundle" }
     },
     "preview": {
-      "distribution": "internal",
-      "android": {
-        "buildType": "apk"
-      },
-      "ios": {
-        "simulator": false
-      }
-    },
-    "production": {
-      "android": {
-        "buildType": "apk",
-        "gradleCommand": ":app:assembleRelease"
-      },
-      "ios": {
-        "simulator": false,
-        "distribution": "adhoc"
-      },
-      "env": {
-        "EXPO_PUBLIC_SUPABASE_URL": "YOUR_PRODUCTION_SUPABASE_URL",
-        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "YOUR_PRODUCTION_SUPABASE_ANON_KEY"
-      }
-    },
-    "production-aab": {
-      "extends": "production",
-      "android": {
-        "buildType": "app-bundle"
-      }
+      "ios": { "distribution": "internal" },
+      "android": { "buildType": "apk" }
     }
-  },
-  "submit": {
-    "production": {}
   }
 }
