@@ -15,7 +15,6 @@
     },
     "assetBundlePatterns": ["**/*"],
     "plugins": [
-      ["@react-native-async-storage/async-storage"],
       [
         "expo-notifications",
         {
