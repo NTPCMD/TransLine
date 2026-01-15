@@ -3,13 +3,12 @@
     "appVersionSource": "remote"
   },
   "build": {
-    "production": {
-      "ios": { "distribution": "store" },
-      "android": { "buildType": "app-bundle" }
-    },
-    "preview": {
-      "ios": { "distribution": "internal" },
-      "android": { "buildType": "apk" }
+    "dev": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      }
     }
   }
 }
