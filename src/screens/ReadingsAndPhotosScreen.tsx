@@ -18,6 +18,11 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
 
   const { status, vehicle } = useActiveAssignment();
 
+  React.useEffect(() => {
+    console.log('assignment status', status, vehicle);
+    console.log('odometer screen vehicle_id', vehicle?.id);
+  }, [status, vehicle]);
+
   const handleContinue = async () => {
     setAttemptedSubmit(true);
     setStartError(null);
@@ -99,7 +104,9 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       {status === 'loading' ? (
         <Text style={{ marginTop: 8, color: '#6B7280' }}>Loading vehicle assignment...</Text>
       ) : vehicle ? (
-        <Text style={{ marginTop: 8 }}>Vehicle: {vehicle.registration ?? vehicle.name ?? 'Unknown registration'}</Text>
+        <Text style={{ marginTop: 8 }}>
+          Vehicle: {vehicle.registration ?? vehicle.rego ?? vehicle.plate_number ?? vehicle.name ?? 'Unknown registration'}
+        </Text>
       ) : (
         <Text style={{ color: '#D32F2F', marginTop: 8 }}>No vehicle assigned. Contact admin.</Text>
       )}

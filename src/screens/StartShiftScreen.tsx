@@ -15,7 +15,13 @@ export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift
   };
 
   const assignedVehicle = state.assignedVehicle ?? vehicle;
-  const vehicleRegistration = state.vehicleRegistration ?? assignedVehicle?.registration ?? vehicle?.registration;
+  const vehicleRegistration =
+    state.vehicleRegistration ??
+    assignedVehicle?.registration ??
+    vehicle?.registration ??
+    vehicle?.rego ??
+    vehicle?.plate_number ??
+    vehicle?.name;
 
   return (
     <ScreenContainer title="Start your shift" subtitle="Confirm vehicle assignment before continuing">
@@ -23,7 +29,7 @@ export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift
         <Text style={styles.label}>Assigned vehicle</Text>
         <Text style={styles.value}>{vehicleRegistration ?? 'Not assigned'}</Text>
         <Text style={styles.meta}>{assignedVehicle?.type ?? vehicle?.type ?? 'Select at depot'}</Text>
-        <Text style={styles.meta}>{assignedVehicle?.depot ?? vehicle?.depot ?? 'Depot pending'}</Text>
+        <Text style={styles.meta}>{assignedVehicle?.depot ?? vehicle?.depot ?? vehicle?.depot_name ?? 'Depot pending'}</Text>
       </View>
       {status === 'loading' ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
       {status !== 'loading' && !state.vehicleId ? (

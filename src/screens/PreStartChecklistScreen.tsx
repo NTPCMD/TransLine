@@ -3,6 +3,7 @@ import { Alert, StyleSheet, Text, View, Pressable, TextInput, ScrollView } from 
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
+import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
 type ChecklistItem = {
@@ -75,6 +76,7 @@ const initialSections: ChecklistSection[] = [
 
 export default function PreStartChecklistScreen({ navigation }: ScreenProps<'PreStartChecklist'>) {
   const { submitPreStartChecklist } = useAppState();
+  const { status, refresh } = useActiveAssignment();
   const [sections, setSections] = useState<ChecklistSection[]>(initialSections);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -109,6 +111,21 @@ export default function PreStartChecklistScreen({ navigation }: ScreenProps<'Pre
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmissionError(null);
+    if (status === 'loading') {
+      setSubmissionError('Vehicle assignment is still loading. Please wait.');
+      setIsSubmitting(false);
+      return;
+    }
+    if (status === 'unassigned') {
+      setSubmissionError('Vehicle not assigned. Please contact admin.');
+      setIsSubmitting(false);
+      return;
+    }
+    if (status === 'error') {
+      setSubmissionError('Unable to verify vehicle assignment.');
+      setIsSubmitting(false);
+      return;
+    }
     const checklistAnswers = sections.flatMap(section =>
       section.items.map(item => ({
         id: item.id,
@@ -143,6 +160,23 @@ export default function PreStartChecklistScreen({ navigation }: ScreenProps<'Pre
 
   return (
     <ScreenContainer title="Vehicle Checklist" subtitle="Complete the pre-start vehicle inspection">
+      {status === 'loading' ? (
+        <View style={styles.alertBox}>
+          <Text style={styles.alertText}>Loading vehicle assignment...</Text>
+        </View>
+      ) : null}
+
+      {status === 'unassigned' || status === 'error' ? (
+        <View style={styles.alertBox}>
+          <Text style={styles.alertText}>
+            {status === 'unassigned'
+              ? 'Vehicle not assigned. Please contact admin.'
+              : 'Unable to verify vehicle assignment.'}
+          </Text>
+          <Button label="Retry assignment" variant="ghost" onPress={refresh} />
+        </View>
+      ) : null}
+
       {hasFailedItems && (
         <View style={styles.alertBox}>
           <Text style={styles.alertText}>Failed items will notify operations</Text>
@@ -200,7 +234,11 @@ export default function PreStartChecklistScreen({ navigation }: ScreenProps<'Pre
 
       <View style={styles.footer}>
         <Button label="Save Draft" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
-        <Button label={isSubmitting ? 'Submitting...' : 'Submit Checklist'} onPress={submitChecklist} disabled={!canSubmit || isSubmitting} />
+        <Button
+          label={isSubmitting ? 'Submitting...' : 'Submit Checklist'}
+          onPress={submitChecklist}
+          disabled={!canSubmit || isSubmitting || status !== 'assigned'}
+        />
       </View>
     </ScreenContainer>
   );

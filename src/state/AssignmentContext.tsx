@@ -12,9 +12,12 @@ export interface VehicleAssignment {
 export interface AssignedVehicle {
   id: string;
   registration?: string | null;
+  rego?: string | null;
+  plate_number?: string | null;
   name?: string | null;
   type?: string | null;
   depot?: string | null;
+  depot_name?: string | null;
 }
 
 interface AssignmentContextValue {
@@ -75,7 +78,7 @@ export function AssignmentProvider({ children }: { children: React.ReactNode }) 
 
       const { data: vehicleRow, error: vehicleError } = await supabase
         .from('vehicles')
-        .select('id, registration, name, type, depot')
+        .select('id, registration, rego, plate_number, name, type, depot, depot_name')
         .eq('id', assignmentRow.vehicle_id)
         .maybeSingle();
 
@@ -88,7 +91,21 @@ export function AssignmentProvider({ children }: { children: React.ReactNode }) 
         return;
       }
 
-      setVehicle(vehicleRow ?? null);
+      if (!vehicleRow) {
+        setVehicle(null);
+        setStatus('assigned');
+        return;
+      }
+
+      setVehicle({
+        ...vehicleRow,
+        registration:
+          vehicleRow.registration ??
+          vehicleRow.rego ??
+          vehicleRow.plate_number ??
+          null,
+        depot: vehicleRow.depot ?? vehicleRow.depot_name ?? null,
+      });
       setStatus('assigned');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load assignment.';
