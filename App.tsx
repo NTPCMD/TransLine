@@ -7,6 +7,7 @@ import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppStateProvider } from './src/state/AppStateContext';
 import { DriverProvider } from './src/state/DriverContext';
+import { AssignmentProvider } from './src/state/AssignmentContext';
 
 import SplashScreen from './src/screens/SplashScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -57,8 +58,9 @@ export default function App() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <DriverProvider>
-        <AppStateProvider>
-          <NavigationContainer>
+        <AssignmentProvider>
+          <AppStateProvider>
+            <NavigationContainer>
           <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
             <Stack.Screen name="Splash" component={SplashScreen} />
             <Stack.Screen name="Login" component={LoginScreen} />
@@ -87,6 +89,7 @@ export default function App() {
           </Stack.Navigator>
         </NavigationContainer>
       </AppStateProvider>
+        </AssignmentProvider>
       </DriverProvider>
     </GestureHandlerRootView>
   );

@@ -4,51 +4,21 @@ import { useFocusEffect } from '@react-navigation/native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { supabase } from '../lib/supabase';
-import { useAppState } from '../state/AppStateContext';
+import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function VehicleAssignmentScreen({ navigation }: ScreenProps<'VehicleAssignment'>) {
-  const { updateAppState } = useAppState();
-  const [loading, setLoading] = useState(true);
+  const { status, vehicle, error, refresh } = useActiveAssignment();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const loadAssignment = useCallback(async () => {
-    setLoading(true);
     setErrorMessage(null);
     try {
-      const { data: sessionData } = await supabase.auth.getSession();
-      const userId = sessionData?.session?.user?.id ?? null;
-      if (!userId) {
-        navigation.replace('Login');
-        return;
-      }
-
-      const { data: assignment, error } = await supabase
-        .from('vehicle_assignments')
-        .select('vehicle_id, unassigned_at')
-        .eq('driver_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (error) {
-        setErrorMessage(error.message);
-        return;
-      }
-
-      if (!assignment || assignment.unassigned_at) {
-        setErrorMessage('Vehicle not assigned. Please contact admin.');
-        return;
-      }
-
-      updateAppState({ vehicleId: assignment.vehicle_id ?? null });
-      navigation.replace('PreStartChecklist');
+      await refresh();
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : 'Unable to verify assignment.');
-    } finally {
-      setLoading(false);
     }
-  }, [navigation, updateAppState]);
+  }, [refresh]);
 
   useFocusEffect(
     useCallback(() => {
@@ -57,34 +27,54 @@ export default function VehicleAssignmentScreen({ navigation }: ScreenProps<'Veh
   );
 
   useEffect(() => {
-    if (errorMessage) {
-      console.warn('Vehicle assignment check failed:', errorMessage);
+    if (error) {
+      console.warn('Vehicle assignment check failed:', error);
     }
-  }, [errorMessage]);
+  }, [error]);
+
+  useEffect(() => {
+    if (status === 'assigned') {
+      navigation.replace('PreStartChecklist');
+    }
+    if (status === 'error') {
+      setErrorMessage(error ?? 'Unable to verify assignment.');
+    }
+    if (status === 'unassigned') {
+      setErrorMessage('Vehicle not assigned. Please contact admin.');
+    }
+    if (status === 'loading') {
+      setErrorMessage(null);
+    }
+  }, [status, error, navigation]);
 
   return (
     <ScreenContainer title="Vehicle confirmation" subtitle="Verifying your active assignment">
       <View style={styles.card}>
         <Text style={styles.title}>Vehicle assignment status</Text>
-        {loading ? (
+        {status === 'loading' ? (
           <Text style={styles.meta}>Checking assignment...</Text>
         ) : errorMessage ? (
           <Text style={styles.error}>{errorMessage}</Text>
         ) : (
-          <Text style={styles.meta}>Assignment confirmed. Redirecting...</Text>
+          <View>
+            <Text style={styles.meta}>Assigned vehicle</Text>
+            <Text style={styles.vehicleText}>{vehicle?.registration ?? 'Unknown registration'}</Text>
+            {vehicle?.name ? <Text style={styles.meta}>{vehicle.name}</Text> : null}
+            {vehicle?.type ? <Text style={styles.meta}>{vehicle.type}</Text> : null}
+            {vehicle?.depot ? <Text style={styles.meta}>{vehicle.depot}</Text> : null}
+          </View>
         )}
       </View>
-      <Button label="Retry" onPress={loadAssignment} disabled={loading} />
+      <Button label="Retry" onPress={loadAssignment} disabled={status === 'loading'} />
       <Button
         label="Log out"
         variant="ghost"
         onPress={async () => {
           await supabase.auth.signOut();
-          updateAppState({ isLoggedIn: false, vehicleId: null });
           Alert.alert('Signed out', 'Please sign in again.');
           navigation.replace('Login');
         }}
-        disabled={loading}
+        disabled={status === 'loading'}
       />
     </ScreenContainer>
   );
@@ -108,5 +98,10 @@ const styles = StyleSheet.create({
   },
   error: {
     color: '#D32F2F',
+  },
+  vehicleText: {
+    color: '#111827',
+    fontWeight: '700',
+    marginTop: 4,
   },
 });

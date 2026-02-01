@@ -3,12 +3,12 @@ import { StyleSheet, Text, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
-import { useDriver } from '../state/DriverContext';
+import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function DriverDeclarationScreen({ navigation }: ScreenProps<'DriverDeclaration'>) {
   const { updateAppState } = useAppState();
-  const { currentVehicle, loading } = useDriver();
+  const { status, vehicle } = useActiveAssignment();
 
   const handleAccept = async () => {
     updateAppState({ declarationAccepted: true });
@@ -26,11 +26,11 @@ export default function DriverDeclarationScreen({ navigation }: ScreenProps<'Dri
           I will report any incidents immediately and follow operational instructions from the operations centre.
         </Text>
       </View>
-      {loading ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
-      {!loading && !currentVehicle ? (
+      {status === 'loading' ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
+      {status !== 'loading' && !vehicle ? (
         <Text style={styles.errorText}>Vehicle not assigned. Please contact admin.</Text>
       ) : null}
-      <Button label="I agree and continue" onPress={handleAccept} disabled={loading || !currentVehicle} />
+      <Button label="I agree and continue" onPress={handleAccept} disabled={status === 'loading' || !vehicle} />
       <Button label="Back to login" variant="ghost" onPress={() => navigation.replace('Login')} />
     </ScreenContainer>
   );

@@ -5,7 +5,7 @@ import TextField from '../components/TextField';
 import Button from '../components/Button';
 import PhotoPicker from '../components/PhotoPicker';
 import { useAppState } from '../state/AppStateContext';
-import { useDriver } from '../state/DriverContext';
+import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'ReadingsAndPhotos'>) {
@@ -16,7 +16,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
   const [startError, setStartError] = useState<string | null>(null);
   const [startWarning, setStartWarning] = useState<string | null>(null);
 
-  const { currentVehicle, loading } = useDriver();
+  const { status, vehicle } = useActiveAssignment();
 
   const handleContinue = async () => {
     setAttemptedSubmit(true);
@@ -27,7 +27,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       return;
     }
 
-    if (!currentVehicle) {
+    if (!vehicle) {
       setStartError('No vehicle assigned. Contact admin.');
       return;
     }
@@ -96,10 +96,10 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
         }}
       />
 
-      {loading ? (
+      {status === 'loading' ? (
         <Text style={{ marginTop: 8, color: '#6B7280' }}>Loading vehicle assignment...</Text>
-      ) : currentVehicle ? (
-        <Text style={{ marginTop: 8 }}>Vehicle: {currentVehicle.registration ?? 'Unknown registration'}</Text>
+      ) : vehicle ? (
+        <Text style={{ marginTop: 8 }}>Vehicle: {vehicle.registration ?? vehicle.name ?? 'Unknown registration'}</Text>
       ) : (
         <Text style={{ color: '#D32F2F', marginTop: 8 }}>No vehicle assigned. Contact admin.</Text>
       )}
@@ -116,7 +116,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       <Button
         label="Continue"
         onPress={handleContinue}
-        disabled={loading || !currentVehicle || !reading.trim() || !photoUri || !state.checklistSubmitted}
+        disabled={status === 'loading' || !vehicle || !reading.trim() || !photoUri || !state.checklistSubmitted}
       />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
     </ScreenContainer>

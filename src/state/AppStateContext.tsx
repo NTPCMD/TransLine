@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { useDriver } from './DriverContext';
+import { useActiveAssignment } from './AssignmentContext';
 import { networkMonitor } from '../lib/networkMonitor';
 import { offlineQueue } from '../lib/offlineQueue';
 import { locationTracker } from '../lib/locationTracking';
@@ -159,7 +160,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       queuedEventsCount: prev.queuedEventsCount,
     }));
   };
-  const { authUserId, currentDriver, currentVehicle, loading: driverLoading } = useDriver();
+  const { authUserId, currentDriver } = useDriver();
+  const { status: assignmentStatus, vehicle: assignedVehicle } = useActiveAssignment();
 
   // Subscribe to offline queue changes
   useEffect(() => {
@@ -178,15 +180,26 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       userId: authUserId,
       isLoggedIn: Boolean(authUserId),
       driverRecordId: currentDriver?.id ?? prev.driverRecordId,
-      vehicleId: driverLoading ? prev.vehicleId : currentVehicle?.id ?? null,
-      assignedVehicle: driverLoading
-        ? prev.assignedVehicle
-        : currentVehicle
-          ? { registration: currentVehicle.registration ?? null, type: currentVehicle.type ?? null, depot: currentVehicle.depot ?? null }
-          : null,
-      vehicleRegistration: driverLoading ? prev.vehicleRegistration : currentVehicle?.registration ?? null,
+      vehicleId:
+        assignmentStatus === 'loading'
+          ? prev.vehicleId
+          : assignedVehicle?.id ?? null,
+      assignedVehicle:
+        assignmentStatus === 'loading'
+          ? prev.assignedVehicle
+          : assignedVehicle
+            ? {
+                registration: assignedVehicle.registration ?? null,
+                type: assignedVehicle.type ?? null,
+                depot: assignedVehicle.depot ?? null,
+              }
+            : null,
+      vehicleRegistration:
+        assignmentStatus === 'loading'
+          ? prev.vehicleRegistration
+          : assignedVehicle?.registration ?? null,
     }));
-  }, [authUserId, currentDriver, currentVehicle, driverLoading]);
+  }, [authUserId, currentDriver, assignmentStatus, assignedVehicle]);
 
   useEffect(() => {
     const lookupVehicleFromRegistration = async (registration: string) => {

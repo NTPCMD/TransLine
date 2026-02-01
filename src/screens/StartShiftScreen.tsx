@@ -3,33 +3,33 @@ import { StyleSheet, Text, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
-import { useDriver } from '../state/DriverContext';
+import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift'>) {
   const { state } = useAppState();
-  const { loading } = useDriver();
+  const { status, vehicle } = useActiveAssignment();
 
   const handleStart = () => {
     navigation.navigate('PreStartChecklist');
   };
 
-  const vehicle = state.assignedVehicle;
-  const vehicleRegistration = state.vehicleRegistration ?? vehicle?.registration;
+  const assignedVehicle = state.assignedVehicle ?? vehicle;
+  const vehicleRegistration = state.vehicleRegistration ?? assignedVehicle?.registration ?? vehicle?.registration;
 
   return (
     <ScreenContainer title="Start your shift" subtitle="Confirm vehicle assignment before continuing">
       <View style={styles.card}>
         <Text style={styles.label}>Assigned vehicle</Text>
         <Text style={styles.value}>{vehicleRegistration ?? 'Not assigned'}</Text>
-        <Text style={styles.meta}>{vehicle?.type ?? 'Select at depot'}</Text>
-        <Text style={styles.meta}>{vehicle?.depot ?? 'Depot pending'}</Text>
+        <Text style={styles.meta}>{assignedVehicle?.type ?? vehicle?.type ?? 'Select at depot'}</Text>
+        <Text style={styles.meta}>{assignedVehicle?.depot ?? vehicle?.depot ?? 'Depot pending'}</Text>
       </View>
-      {loading ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
-      {!loading && !state.vehicleId ? (
+      {status === 'loading' ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
+      {status !== 'loading' && !state.vehicleId ? (
         <Text style={styles.errorText}>Vehicle not assigned. Please contact admin.</Text>
       ) : null}
-      <Button label="Begin pre-start checklist" onPress={handleStart} disabled={loading || !state.vehicleId} />
+      <Button label="Begin pre-start checklist" onPress={handleStart} disabled={status === 'loading' || !state.vehicleId} />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
     </ScreenContainer>
   );
