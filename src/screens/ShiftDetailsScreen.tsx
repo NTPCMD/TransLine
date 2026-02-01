@@ -20,7 +20,8 @@ export default function ShiftDetailsScreen({ navigation }: ScreenProps<'ShiftDet
       </InfoCard>
       <InfoCard title="Times">
         <Text style={styles.text}>Started: {state.shiftStartTime ? state.shiftStartTime.toLocaleTimeString() : 'Not set'}</Text>
-        <Text style={styles.meta}>Checklist complete: {state.checklistCompleted ? 'Yes' : 'No'}</Text>
+        <Text style={styles.meta}>Checklist submitted: {state.checklistSubmitted ? 'Yes' : 'No'}</Text>
+        <Text style={styles.meta}>Checklist passed: {state.checklistCompleted ? 'Yes' : 'No'}</Text>
       </InfoCard>
       <InfoCard title="Readings">
         <Text style={styles.text}>Odometer: {state.odometerReading || 'Pending'}</Text>

@@ -19,11 +19,12 @@ import type { ScreenProps } from '../types/navigation';
 
 export default function ProfileScreen({ navigation }: ScreenProps<'Profile'>) {
   const { currentDriver, authUserId } = useDriver();
-  const { updateAppState, resetShift } = useAppState();
+  const { state, updateAppState, resetShift } = useAppState();
   const [loading, setLoading] = useState(true);
   const [driverEmail, setDriverEmail] = useState<string>('');
   const [driverPhone, setDriverPhone] = useState<string>('');
   const [lastLogin, setLastLogin] = useState<string>('');
+  const [showDebug, setShowDebug] = useState(false);
   
   // Settings state
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -191,7 +192,9 @@ export default function ProfileScreen({ navigation }: ScreenProps<'Profile'>) {
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         {/* Driver Information */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Driver Information</Text>
+          <TouchableOpacity onLongPress={() => setShowDebug(prev => !prev)} activeOpacity={1}>
+            <Text style={styles.sectionTitle}>Driver Information</Text>
+          </TouchableOpacity>
           <InfoCard title="Details">
             <View style={styles.infoRow}>
               <Text style={styles.infoLabel}>Name:</Text>
@@ -218,6 +221,46 @@ export default function ProfileScreen({ navigation }: ScreenProps<'Profile'>) {
               <Text style={styles.infoValue}>{formatLastLogin(lastLogin)}</Text>
             </View>
           </InfoCard>
+          {showDebug ? (
+            <InfoCard title="Debug panel">
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Auth UID:</Text>
+                <Text style={styles.infoValue}>{authUserId ?? 'N/A'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Driver ID:</Text>
+                <Text style={styles.infoValue}>{state.driverRecordId ?? 'N/A'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Vehicle ID:</Text>
+                <Text style={styles.infoValue}>{state.vehicleId ?? 'N/A'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Assignment:</Text>
+                <Text style={styles.infoValue}>{state.vehicleId ? 'active' : 'missing'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Shift ID:</Text>
+                <Text style={styles.infoValue}>{state.activeShiftId ?? 'N/A'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Checklist submitted:</Text>
+                <Text style={styles.infoValue}>{state.checklistSubmitted ? 'Yes' : 'No'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Checklist passed:</Text>
+                <Text style={styles.infoValue}>{state.checklistCompleted ? 'Yes' : 'No'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Start odometer:</Text>
+                <Text style={styles.infoValue}>{state.odometerReading || 'N/A'}</Text>
+              </View>
+              <View style={styles.infoRow}>
+                <Text style={styles.infoLabel}>Start capture:</Text>
+                <Text style={styles.infoValue}>{state.startOdometerCapturedAt ?? 'N/A'}</Text>
+              </View>
+            </InfoCard>
+          ) : null}
         </View>
 
         {/* Settings */}

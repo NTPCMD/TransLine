@@ -58,50 +58,38 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     setCurrentDriver(driver as DriverRecord | null);
 
-    if (!driver) {
-      setLoading(false);
-      return;
-    }
-
-    // Resolve assigned vehicle. Support two patterns:
-    // Option A: vehicles.assigned_driver_id
-    // Option B: driver_vehicles join table with active=true
     try {
-      // Option A
-      const { data: vehicleA, error: vErrA } = await supabase
-        .from('vehicles')
-        .select('id, registration, type, depot')
-        .eq('assigned_driver_id', driver.id)
+      const { data: assignment, error: assignmentError } = await supabase
+        .from('vehicle_assignments')
+        .select('vehicle_id, unassigned_at')
+        .eq('driver_id', userId)
+        .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      if (!vErrA && vehicleA) {
-        setCurrentVehicle(vehicleA as VehicleRecord);
+      if (assignmentError) {
+        console.warn('Error fetching vehicle assignment', { message: assignmentError.message });
+      }
+
+      if (!assignment || assignment.unassigned_at) {
+        setCurrentVehicle(null);
         setLoading(false);
         return;
       }
 
-      // Option B: driver_vehicles
-      const { data: dv, error: dvErr } = await supabase
-        .from('driver_vehicles')
-        .select('vehicle_id')
-        .eq('driver_id', driver.id)
-        .eq('active', true)
-        .limit(1);
+      const { data: vehicle, error: vehicleError } = await supabase
+        .from('vehicles')
+        .select('id, registration, type, depot')
+        .eq('id', assignment.vehicle_id)
+        .maybeSingle();
 
-      if (!dvErr && dv && dv.length > 0) {
-        const vid = (dv[0] as any).vehicle_id as string;
-        const { data: vehicleB, error: vErrB } = await supabase
-          .from('vehicles')
-          .select('id, registration, type, depot')
-          .eq('id', vid)
-          .maybeSingle();
-        if (!vErrB && vehicleB) {
-          setCurrentVehicle(vehicleB as VehicleRecord);
-          setLoading(false);
-          return;
-        }
+      if (vehicleError) {
+        console.warn('Error fetching assigned vehicle details', { message: vehicleError.message });
       }
+
+      setCurrentVehicle(vehicle ?? null);
+      setLoading(false);
+      return;
     } catch (e) {
       console.warn('Exception while fetching assigned vehicle', e);
     }

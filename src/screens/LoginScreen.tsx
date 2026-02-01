@@ -4,14 +4,12 @@ import ScreenContainer from '../components/ScreenContainer';
 import TextField from '../components/TextField';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
-import { useDriver } from '../state/DriverContext';
 import { supabase } from '../lib/supabase';
 import { pushNotificationManager } from '../lib/pushNotifications';
 import type { ScreenProps } from '../types/navigation';
 
 export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
   const { updateAppState } = useAppState();
-  const { currentDriver } = useDriver();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
@@ -43,6 +41,13 @@ export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
         }
       }
 
+      const { data: sessionData } = await supabase.auth.getSession();
+      const userId = sessionData?.session?.user?.id ?? null;
+      if (!userId) {
+        Alert.alert('Authentication error', 'Unable to resolve your user session.');
+        return;
+      }
+
       updateAppState({ isLoggedIn: true });
       
       // Register for push notifications after successful login
@@ -51,7 +56,7 @@ export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
         console.error('Failed to register push notifications:', error);
       });
       
-      navigation.replace('DriverDeclaration');
+      navigation.replace('VehicleAssignment');
     } catch (error) {
       Alert.alert('Authentication error', error instanceof Error ? error.message : 'Unable to authenticate.');
     }

@@ -1,10 +1,22 @@
 import React, { useEffect } from 'react';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
 export default function SplashScreen({ navigation }: ScreenProps<'Splash'>) {
   useEffect(() => {
-    const timer = setTimeout(() => navigation.replace('Login'), 1200);
+    const bootstrap = async () => {
+      const { data } = await supabase.auth.getSession();
+      const userId = data?.session?.user?.id ?? null;
+      if (userId) {
+        navigation.replace('VehicleAssignment');
+        return;
+      }
+      navigation.replace('Login');
+    };
+    const timer = setTimeout(() => {
+      bootstrap();
+    }, 1200);
     return () => clearTimeout(timer);
   }, [navigation]);
 

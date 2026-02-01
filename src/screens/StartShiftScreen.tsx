@@ -3,13 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
+import { useDriver } from '../state/DriverContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift'>) {
-  const { state, updateAppState } = useAppState();
+  const { state } = useAppState();
+  const { loading } = useDriver();
 
   const handleStart = () => {
-    updateAppState({ shiftStarted: true });
     navigation.navigate('PreStartChecklist');
   };
 
@@ -24,7 +25,11 @@ export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift
         <Text style={styles.meta}>{vehicle?.type ?? 'Select at depot'}</Text>
         <Text style={styles.meta}>{vehicle?.depot ?? 'Depot pending'}</Text>
       </View>
-      <Button label="Begin pre-start checklist" onPress={handleStart} />
+      {loading ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
+      {!loading && !state.vehicleId ? (
+        <Text style={styles.errorText}>Vehicle not assigned. Please contact admin.</Text>
+      ) : null}
+      <Button label="Begin pre-start checklist" onPress={handleStart} disabled={loading || !state.vehicleId} />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
     </ScreenContainer>
   );
@@ -49,5 +54,13 @@ const styles = StyleSheet.create({
   },
   meta: {
     color: '#4B5563',
+  },
+  errorText: {
+    color: '#D32F2F',
+    marginTop: 8,
+  },
+  metaText: {
+    color: '#6B7280',
+    marginTop: 8,
   },
 });

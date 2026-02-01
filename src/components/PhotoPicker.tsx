@@ -1,15 +1,23 @@
-import React, { useState } from 'react';
-import { View, Image, StyleSheet, Text, TouchableOpacity } from 'react-native';
+import React, { useRef, useState } from 'react';
+import { View, Image, StyleSheet, Text, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
+import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location';
 
 interface PhotoPickerProps {
   uri?: string | null;
   onChange: (uri: string | null) => void;
   label?: string;
+  cameraOnly?: boolean;
+  onCaptureMeta?: (meta: { capturedAt: string; location: { lat: number; lng: number; accuracy: number | null } }) => void;
 }
 
-export default function PhotoPicker({ uri, onChange, label }: PhotoPickerProps) {
+export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, onCaptureMeta }: PhotoPickerProps) {
   const [loading, setLoading] = useState(false);
+  const [showCamera, setShowCamera] = useState(false);
+  const [isCapturing, setIsCapturing] = useState(false);
+  const cameraRef = useRef<CameraView | null>(null);
+  const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   const pickImage = async (fromCamera = false) => {
     try {
@@ -37,12 +45,97 @@ export default function PhotoPicker({ uri, onChange, label }: PhotoPickerProps) 
       if (!result.canceled) {
         // @ts-ignore - expo types sometimes use `uri` or `assets`
         const pickedUri = result.uri ?? (result.assets && result.assets[0]?.uri) ?? null;
-        if (pickedUri) onChange(pickedUri);
+        if (pickedUri) {
+          if (fromCamera && onCaptureMeta) {
+            const capturedAt = new Date().toISOString();
+            const permission = await Location.getForegroundPermissionsAsync();
+            if (permission.status !== 'granted') {
+              const requested = await Location.requestForegroundPermissionsAsync();
+              if (requested.status !== 'granted') {
+                Alert.alert('Location required', 'Location permission is required to capture this photo.');
+                setLoading(false);
+                return;
+              }
+            }
+            const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+            onCaptureMeta({
+              capturedAt,
+              location: {
+                lat: location.coords.latitude,
+                lng: location.coords.longitude,
+                accuracy: location.coords.accuracy ?? null,
+              },
+            });
+          }
+          onChange(pickedUri);
+        }
       }
     } catch (e) {
       console.warn(e);
+      Alert.alert('Photo failed', 'Unable to capture photo. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const openCamera = async () => {
+    if (cameraPermission?.granted === false) {
+      const requested = await requestCameraPermission();
+      if (!requested.granted) {
+        Alert.alert('Camera required', 'Camera permission is required to take photos.');
+        return;
+      }
+    }
+    if (!cameraPermission?.granted) {
+      const requested = await requestCameraPermission();
+      if (!requested.granted) {
+        Alert.alert('Camera required', 'Camera permission is required to take photos.');
+        return;
+      }
+    }
+    setShowCamera(true);
+  };
+
+  const captureWithCamera = async () => {
+    if (!cameraRef.current || isCapturing) return;
+    setIsCapturing(true);
+    const capturedAt = new Date().toISOString();
+    try {
+      const photo = await cameraRef.current.takePictureAsync({ quality: 0.6 });
+      if (!photo?.uri) {
+        Alert.alert('Photo failed', 'Unable to capture photo. Please try again.');
+        setIsCapturing(false);
+        return;
+      }
+
+      if (onCaptureMeta) {
+        const permission = await Location.getForegroundPermissionsAsync();
+        if (permission.status !== 'granted') {
+          const requested = await Location.requestForegroundPermissionsAsync();
+          if (requested.status !== 'granted') {
+            Alert.alert('Location required', 'Location permission is required to capture this photo.');
+            setIsCapturing(false);
+            return;
+          }
+        }
+        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
+        onCaptureMeta({
+          capturedAt,
+          location: {
+            lat: location.coords.latitude,
+            lng: location.coords.longitude,
+            accuracy: location.coords.accuracy ?? null,
+          },
+        });
+      }
+
+      onChange(photo.uri);
+      setShowCamera(false);
+    } catch (e) {
+      console.warn(e);
+      Alert.alert('Photo failed', 'Unable to capture photo. Please try again.');
+    } finally {
+      setIsCapturing(false);
     }
   };
 
@@ -53,7 +146,7 @@ export default function PhotoPicker({ uri, onChange, label }: PhotoPickerProps) 
         <View style={styles.previewRow}>
           <Image source={{ uri }} style={styles.preview} />
           <View style={styles.previewActions}>
-            <TouchableOpacity onPress={() => pickImage(true)} style={styles.smallButton}>
+            <TouchableOpacity onPress={() => (cameraOnly ? openCamera() : pickImage(true))} style={styles.smallButton}>
               <Text style={styles.smallButtonText}>Retake</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => onChange(null)} style={[styles.smallButton, styles.removeButton]}>
@@ -63,14 +156,37 @@ export default function PhotoPicker({ uri, onChange, label }: PhotoPickerProps) 
         </View>
       ) : (
         <View style={styles.pickRow}>
-          <TouchableOpacity onPress={() => pickImage(true)} style={styles.actionButton}>
+          <TouchableOpacity onPress={() => (cameraOnly ? openCamera() : pickImage(true))} style={styles.actionButton}>
             <Text style={styles.actionText}>Take photo</Text>
           </TouchableOpacity>
-          <TouchableOpacity onPress={() => pickImage(false)} style={styles.actionButton}>
-            <Text style={styles.actionText}>Choose from library</Text>
-          </TouchableOpacity>
+          {!cameraOnly ? (
+            <TouchableOpacity onPress={() => pickImage(false)} style={styles.actionButton}>
+              <Text style={styles.actionText}>Choose from library</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
       )}
+      <Modal visible={showCamera} animationType="slide">
+        <View style={styles.cameraContainer}>
+          <CameraView ref={cameraRef} style={styles.cameraPreview} facing="back" />
+          <View style={styles.cameraControls}>
+            <TouchableOpacity
+              onPress={() => setShowCamera(false)}
+              style={[styles.cameraButton, styles.cancelButton]}
+              disabled={isCapturing}
+            >
+              <Text style={styles.cameraButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={captureWithCamera}
+              style={[styles.cameraButton, styles.captureButton]}
+              disabled={isCapturing}
+            >
+              {isCapturing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.cameraButtonText}>Capture</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -125,5 +241,33 @@ const styles = StyleSheet.create({
   },
   smallButtonText: {
     color: '#111827',
+  },
+  cameraContainer: {
+    flex: 1,
+    backgroundColor: '#000000',
+  },
+  cameraPreview: {
+    flex: 1,
+  },
+  cameraControls: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    padding: 16,
+    backgroundColor: '#111827',
+  },
+  cameraButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+  },
+  cancelButton: {
+    backgroundColor: '#374151',
+  },
+  captureButton: {
+    backgroundColor: '#C62828',
+  },
+  cameraButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 });

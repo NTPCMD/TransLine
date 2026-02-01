@@ -3,30 +3,15 @@ import { StyleSheet, Text, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
-import { supabase } from '../lib/supabase';
+import { useDriver } from '../state/DriverContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function DriverDeclarationScreen({ navigation }: ScreenProps<'DriverDeclaration'>) {
   const { updateAppState } = useAppState();
+  const { currentVehicle, loading } = useDriver();
 
   const handleAccept = async () => {
-    const registration = 'ABC-123';
-    const { data } = await supabase
-      .from('vehicles')
-      .select('id, registration')
-      .eq('registration', registration)
-      .single();
-
-    updateAppState({
-      declarationAccepted: true,
-      vehicleId: data?.id ?? null,
-      vehicleRegistration: data?.registration ?? registration,
-      assignedVehicle: {
-        registration: data?.registration ?? registration,
-        type: 'Rigid Truck',
-        depot: 'Sydney Depot',
-      },
-    });
+    updateAppState({ declarationAccepted: true });
     navigation.replace('StartShift');
   };
 
@@ -41,7 +26,11 @@ export default function DriverDeclarationScreen({ navigation }: ScreenProps<'Dri
           I will report any incidents immediately and follow operational instructions from the operations centre.
         </Text>
       </View>
-      <Button label="I agree and continue" onPress={handleAccept} />
+      {loading ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
+      {!loading && !currentVehicle ? (
+        <Text style={styles.errorText}>Vehicle not assigned. Please contact admin.</Text>
+      ) : null}
+      <Button label="I agree and continue" onPress={handleAccept} disabled={loading || !currentVehicle} />
       <Button label="Back to login" variant="ghost" onPress={() => navigation.replace('Login')} />
     </ScreenContainer>
   );
@@ -59,5 +48,13 @@ const styles = StyleSheet.create({
   text: {
     color: '#111827',
     lineHeight: 20,
+  },
+  errorText: {
+    color: '#D32F2F',
+    marginTop: 8,
+  },
+  metaText: {
+    color: '#6B7280',
+    marginTop: 8,
   },
 });
