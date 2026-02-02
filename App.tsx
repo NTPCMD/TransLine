@@ -39,14 +39,14 @@ const Drawer = createDrawerNavigator();
 function MainDrawer() {
   return (
       <Drawer.Navigator initialRouteName="ActiveShift" screenOptions={{ headerShown: false }}>
-      <Drawer.Screen name="ActiveShift" component={require('./src/screens/ActiveShiftScreen').default} />
-      <Drawer.Screen name="ShiftDetails" component={require('./src/screens/ShiftDetailsScreen').default} />
-      <Drawer.Screen name="FuelLog" component={require('./src/screens/FuelLogScreen').default} />
-      <Drawer.Screen name="IncidentReport" component={require('./src/screens/IncidentReportScreen').default} />
-      <Drawer.Screen name="SendNote" component={require('./src/screens/SendNoteScreen').default} />
-      <Drawer.Screen name="MedicalAbsence" component={require('./src/screens/MedicalAbsenceScreen').default} />
-      <Drawer.Screen name="Announcements" component={require('./src/screens/AnnouncementsScreen').default} />
-      <Drawer.Screen name="VehicleMaintenanceLog" component={require('./src/screens/VehicleMaintenanceLogScreen').default} />
+      <Drawer.Screen name="ActiveShift" component={ActiveShiftScreen} />
+      <Drawer.Screen name="ShiftDetails" component={ShiftDetailsScreen} />
+      <Drawer.Screen name="FuelLog" component={FuelLogScreen} />
+      <Drawer.Screen name="IncidentReport" component={IncidentReportScreen} />
+      <Drawer.Screen name="SendNote" component={SendNoteScreen} />
+      <Drawer.Screen name="MedicalAbsence" component={MedicalAbsenceScreen} />
+      <Drawer.Screen name="Announcements" component={AnnouncementsScreen} />
+      <Drawer.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen} />
       <Drawer.Screen name="OfflineQueue" component={OfflineQueueScreen} options={{ title: 'Offline Queue' }} />
       <Drawer.Screen name="Profile" component={ProfileScreen} options={{ title: 'Profile' }} />
       <Drawer.Screen name="ShiftHistory" component={ShiftHistoryScreen} options={{ title: 'Shift History' }} />
