@@ -9,6 +9,7 @@ import type { ScreenProps } from '../types/navigation';
 export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift'>) {
   const { state } = useAppState();
   const { status, vehicle } = useActiveAssignment();
+  const buildStamp = 'build-2026-02-01-assignments';
 
   const handleStart = () => {
     navigation.navigate('PreStartChecklist');
@@ -37,6 +38,7 @@ export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift
       ) : null}
       <Button label="Begin pre-start checklist" onPress={handleStart} disabled={status === 'loading' || !state.vehicleId} />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
+      <Text style={styles.buildStamp}>Build: {buildStamp}</Text>
     </ScreenContainer>
   );
 }
@@ -68,5 +70,11 @@ const styles = StyleSheet.create({
   metaText: {
     color: '#6B7280',
     marginTop: 8,
+  },
+  buildStamp: {
+    color: '#9CA3AF',
+    fontSize: 12,
+    marginTop: 12,
+    textAlign: 'center',
   },
 });

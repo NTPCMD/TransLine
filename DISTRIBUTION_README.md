@@ -1,5 +1,22 @@
 # TransLine Driver App - Installation Guide
 
+## Developer Quickstart (Expo Go)
+
+The Expo app root is the repository root (`/workspace/TransLine`).
+
+Run the driver app:
+
+```bash
+cd /workspace/TransLine
+npx expo start
+```
+
+If you need a tunnel for device testing:
+
+```bash
+npx expo start --tunnel
+```
+
 ## For Android Drivers
 
 ### Step 1: Enable Installation from Unknown Sources
