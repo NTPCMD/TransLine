@@ -86,6 +86,7 @@ const AppStateContext = createContext<AppStateContextValue | undefined>(undefine
 
 const EVENT_QUEUE_KEY = 'transline:queuedEvents';
 const WRITE_QUEUE_KEY = 'transline:queuedWrites';
+const SHIFT_STATE_KEY = 'transline:shiftState';
 
 type EventQueueItem = {
   id: string;
@@ -175,6 +176,52 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const restoreShiftState = async () => {
+      const stored = await AsyncStorage.getItem(SHIFT_STATE_KEY);
+      if (!stored) return;
+      try {
+        const parsed = JSON.parse(stored) as {
+          activeShiftId?: string | null;
+          shiftStartTime?: string | null;
+          odometerReading?: string;
+          shiftStarted?: boolean;
+        };
+        setState(prev => ({
+          ...prev,
+          activeShiftId: parsed.activeShiftId ?? prev.activeShiftId,
+          shiftStartTime: parsed.shiftStartTime ? new Date(parsed.shiftStartTime) : prev.shiftStartTime,
+          odometerReading: parsed.odometerReading ?? prev.odometerReading,
+          shiftStarted: parsed.shiftStarted ?? prev.shiftStarted,
+        }));
+      } catch (error) {
+        console.warn('Failed to restore shift state', error);
+      }
+    };
+
+    restoreShiftState();
+  }, []);
+
+  useEffect(() => {
+    const persistShiftState = async () => {
+      try {
+        await AsyncStorage.setItem(
+          SHIFT_STATE_KEY,
+          JSON.stringify({
+            activeShiftId: state.activeShiftId,
+            shiftStartTime: state.shiftStartTime ? state.shiftStartTime.toISOString() : null,
+            odometerReading: state.odometerReading,
+            shiftStarted: state.shiftStarted,
+          })
+        );
+      } catch (error) {
+        console.warn('Failed to persist shift state', error);
+      }
+    };
+
+    persistShiftState();
+  }, [state.activeShiftId, state.shiftStartTime, state.odometerReading, state.shiftStarted]);
+
+  useEffect(() => {
     setState(prev => ({
       ...prev,
       userId: authUserId,
@@ -200,6 +247,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           : assignedVehicle?.registration ?? null,
     }));
   }, [authUserId, currentDriver, assignmentStatus, assignedVehicle]);
+
+  useEffect(() => {
+    console.log('shift state updated', {
+      activeShiftId: state.activeShiftId,
+      shiftStarted: state.shiftStarted,
+      shiftStartTime: state.shiftStartTime,
+    });
+  }, [state.activeShiftId, state.shiftStarted, state.shiftStartTime]);
 
   useEffect(() => {
     const lookupVehicleFromRegistration = async (registration: string) => {

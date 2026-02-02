@@ -12,6 +12,10 @@ export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift
   const buildStamp = 'build-2026-02-01-assignments';
 
   const handleStart = () => {
+    console.log('start shift pressed', {
+      assignmentStatus: status,
+      vehicleId: state.vehicleId,
+    });
     navigation.navigate('PreStartChecklist');
   };
 

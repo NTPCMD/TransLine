@@ -27,6 +27,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
     setAttemptedSubmit(true);
     setStartError(null);
     setStartWarning(null);
+    console.log('start shift submit pressed', { status, vehicleId: vehicle?.id });
     if (!reading.trim() || !photoUri) {
       // Inline errors will show; prevent navigation
       return;
@@ -53,6 +54,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       odometerPhoto: photoUri,
     });
     const { shiftId, error, queued } = await startShift();
+    console.log('start shift response', { shiftId, error, queued });
     if (!shiftId) {
       setStartError(error ?? 'Unable to start shift.');
       return;
@@ -63,6 +65,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
     updateAppState({ shiftStarted: true });
     // After readings, navigate to main drawer home (dashboard)
     navigation.replace('Main');
+    console.log('navigation to Main after start shift');
   };
 
   return (
