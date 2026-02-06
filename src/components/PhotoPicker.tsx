@@ -2,14 +2,18 @@ import React, { useRef, useState } from 'react';
 import { View, Image, StyleSheet, Text, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import * as Location from 'expo-location';
+import { getGpsFix } from '../lib/gps';
 
 interface PhotoPickerProps {
   uri?: string | null;
   onChange: (uri: string | null) => void;
   label?: string;
   cameraOnly?: boolean;
-  onCaptureMeta?: (meta: { capturedAt: string; location: { lat: number; lng: number; accuracy: number | null } }) => void;
+  onCaptureMeta?: (meta: {
+    capturedAt: string;
+    location: { lat: number | null; lng: number | null; accuracy: number | null };
+    locationDenied?: boolean;
+  }) => void;
 }
 
 export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, onCaptureMeta }: PhotoPickerProps) {
@@ -48,24 +52,15 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
         if (pickedUri) {
           if (fromCamera && onCaptureMeta) {
             const capturedAt = new Date().toISOString();
-            const permission = await Location.getForegroundPermissionsAsync();
-            if (permission.status !== 'granted') {
-              const requested = await Location.requestForegroundPermissionsAsync();
-              if (requested.status !== 'granted') {
-                Alert.alert('Location required', 'Location permission is required to capture this photo.');
-                setLoading(false);
-                return;
-              }
+            let locationDenied = false;
+            let location = { lat: null, lng: null, accuracy: null };
+            try {
+              const fix = await getGpsFix();
+              location = { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };
+            } catch (e) {
+              locationDenied = true;
             }
-            const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
-            onCaptureMeta({
-              capturedAt,
-              location: {
-                lat: location.coords.latitude,
-                lng: location.coords.longitude,
-                accuracy: location.coords.accuracy ?? null,
-              },
-            });
+            onCaptureMeta({ capturedAt, location, locationDenied });
           }
           onChange(pickedUri);
         }
@@ -109,24 +104,15 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
       }
 
       if (onCaptureMeta) {
-        const permission = await Location.getForegroundPermissionsAsync();
-        if (permission.status !== 'granted') {
-          const requested = await Location.requestForegroundPermissionsAsync();
-          if (requested.status !== 'granted') {
-            Alert.alert('Location required', 'Location permission is required to capture this photo.');
-            setIsCapturing(false);
-            return;
-          }
+        let locationDenied = false;
+        let location = { lat: null, lng: null, accuracy: null };
+        try {
+          const fix = await getGpsFix();
+          location = { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };
+        } catch (e) {
+          locationDenied = true;
         }
-        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
-        onCaptureMeta({
-          capturedAt,
-          location: {
-            lat: location.coords.latitude,
-            lng: location.coords.longitude,
-            accuracy: location.coords.accuracy ?? null,
-          },
-        });
+        onCaptureMeta({ capturedAt, location, locationDenied });
       }
 
       onChange(photo.uri);

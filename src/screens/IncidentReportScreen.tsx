@@ -7,7 +7,8 @@ import PhotoPicker from '../components/PhotoPicker';
 import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function IncidentReportScreen({ navigation }: ScreenProps<'IncidentReport'>) {
+export default function IncidentReportScreen(props: ScreenProps<'IncidentReport'>) {
+  const { navigation } = props;
   const { createEvent } = useAppState();
   const [severity, setSeverity] = useState('');
   const [title, setTitle] = useState('');

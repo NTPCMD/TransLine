@@ -6,7 +6,8 @@ import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function SendNoteScreen({ navigation }: ScreenProps<'SendNote'>) {
+export default function SendNoteScreen(props: ScreenProps<'SendNote'>) {
+  const { navigation } = props;
   const [note, setNote] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { createEvent, state, updateAppState } = useAppState();

@@ -6,7 +6,8 @@ import Button from '../components/Button';
 import PhotoPicker from '../components/PhotoPicker';
 import type { ScreenProps } from '../types/navigation';
 
-export default function MedicalAbsenceScreen({ navigation }: ScreenProps<'MedicalAbsence'>) {
+export default function MedicalAbsenceScreen(props: ScreenProps<'MedicalAbsence'>) {
+  const { navigation } = props;
   const [reason, setReason] = useState('');
   const [certificateUri, setCertificateUri] = useState<string | null>(null);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);

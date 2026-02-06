@@ -3,7 +3,8 @@ import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
-export default function SplashScreen({ navigation }: ScreenProps<'Splash'>) {
+export default function SplashScreen(props: ScreenProps<'Splash'>) {
+  const { navigation } = props;
   useEffect(() => {
     const bootstrap = async () => {
       const { data } = await supabase.auth.getSession();

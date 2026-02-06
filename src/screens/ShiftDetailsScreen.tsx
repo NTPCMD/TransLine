@@ -6,7 +6,8 @@ import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function ShiftDetailsScreen({ navigation }: ScreenProps<'ShiftDetails'>) {
+export default function ShiftDetailsScreen(props: ScreenProps<'ShiftDetails'>) {
+  const { navigation } = props;
   const { state } = useAppState();
   const checklistAnswers = state.preStartChecklistAnswers;
   const shiftNotes = state.shiftNotes;

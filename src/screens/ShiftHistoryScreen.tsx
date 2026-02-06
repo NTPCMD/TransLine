@@ -24,7 +24,8 @@ interface Shift {
   vehicle_registration?: string;
 }
 
-export default function ShiftHistoryScreen({ navigation }: ScreenProps<'ShiftHistory'>) {
+export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
+  const { navigation } = props;
   const { authUserId } = useDriver();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);

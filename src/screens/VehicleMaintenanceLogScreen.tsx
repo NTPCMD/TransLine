@@ -10,7 +10,8 @@ interface Entry {
   note: string;
 }
 
-export default function VehicleMaintenanceLogScreen({ navigation }: ScreenProps<'VehicleMaintenanceLog'>) {
+export default function VehicleMaintenanceLogScreen(props: ScreenProps<'VehicleMaintenanceLog'>) {
+  const { navigation } = props;
   const { state } = useAppState();
   const entries: Entry[] = [
     { id: '1', note: 'Tyre pressure checked' },

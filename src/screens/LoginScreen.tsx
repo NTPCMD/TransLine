@@ -8,7 +8,8 @@ import { supabase } from '../lib/supabase';
 import { pushNotificationManager } from '../lib/pushNotifications';
 import type { ScreenProps } from '../types/navigation';
 
-export default function LoginScreen({ navigation }: ScreenProps<'Login'>) {
+export default function LoginScreen(props: ScreenProps<'Login'>) {
+  const { navigation } = props;
   const { updateAppState } = useAppState();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');

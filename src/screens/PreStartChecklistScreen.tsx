@@ -74,7 +74,8 @@ const initialSections: ChecklistSection[] = [
   },
 ];
 
-export default function PreStartChecklistScreen({ navigation }: ScreenProps<'PreStartChecklist'>) {
+export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChecklist'>) {
+  const { navigation } = props;
   const { submitPreStartChecklist } = useAppState();
   const { status, refresh } = useActiveAssignment();
   const [sections, setSections] = useState<ChecklistSection[]>(initialSections);

@@ -10,7 +10,8 @@ const announcements = [
   'Remember to upload receipts after fuel stops.',
 ];
 
-export default function AnnouncementsScreen({ navigation }: ScreenProps<'Announcements'>) {
+export default function AnnouncementsScreen(props: ScreenProps<'Announcements'>) {
+  const { navigation } = props;
   return (
     <ScreenContainer title="Announcements" subtitle="Latest operations updates">
       <View style={styles.card}>

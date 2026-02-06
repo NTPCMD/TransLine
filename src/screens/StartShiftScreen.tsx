@@ -6,7 +6,8 @@ import { useAppState } from '../state/AppStateContext';
 import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift'>) {
+export default function StartShiftScreen(props: ScreenProps<'StartShift'>) {
+  const { navigation } = props;
   const { state } = useAppState();
   const { status, vehicle } = useActiveAssignment();
   const buildStamp = 'build-2026-02-01-assignments';
@@ -25,8 +26,8 @@ export default function StartShiftScreen({ navigation }: ScreenProps<'StartShift
     assignedVehicle?.registration ??
     vehicle?.registration ??
     vehicle?.rego ??
-    vehicle?.plate_number ??
-    vehicle?.name;
+    vehicle?.plate_number;
+
 
   return (
     <ScreenContainer title="Start your shift" subtitle="Confirm vehicle assignment before continuing">

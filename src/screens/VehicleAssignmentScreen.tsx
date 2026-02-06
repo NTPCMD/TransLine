@@ -7,7 +7,8 @@ import { supabase } from '../lib/supabase';
 import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function VehicleAssignmentScreen({ navigation }: ScreenProps<'VehicleAssignment'>) {
+export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssignment'>) {
+  const { navigation } = props;
   const { status, vehicle, error, refresh } = useActiveAssignment();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -58,8 +59,7 @@ export default function VehicleAssignmentScreen({ navigation }: ScreenProps<'Veh
         ) : (
           <View>
             <Text style={styles.meta}>Assigned vehicle</Text>
-            <Text style={styles.vehicleText}>{vehicle?.registration ?? 'Unknown registration'}</Text>
-            {vehicle?.name ? <Text style={styles.meta}>{vehicle.name}</Text> : null}
+            <Text style={styles.vehicleText}>{vehicle?.label ?? vehicle?.registration ?? 'Unknown registration'}</Text>
             {vehicle?.type ? <Text style={styles.meta}>{vehicle.type}</Text> : null}
             {vehicle?.depot ? <Text style={styles.meta}>{vehicle.depot}</Text> : null}
           </View>

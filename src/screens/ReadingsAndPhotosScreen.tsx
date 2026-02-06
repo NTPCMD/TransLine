@@ -6,9 +6,11 @@ import Button from '../components/Button';
 import PhotoPicker from '../components/PhotoPicker';
 import { useAppState } from '../state/AppStateContext';
 import { useActiveAssignment } from '../state/AssignmentContext';
+import { getGpsFix } from '../lib/gps';
 import type { ScreenProps } from '../types/navigation';
 
-export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'ReadingsAndPhotos'>) {
+export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndPhotos'>) {
+  const { navigation } = props;
   const { state, startShift, updateAppState } = useAppState();
   const [reading, setReading] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -22,6 +24,40 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
     console.log('assignment status', status, vehicle);
     console.log('odometer screen vehicle_id', vehicle?.id);
   }, [status, vehicle]);
+
+  const ensureStartOdometerGps = async () => {
+    if (state.startOdometerLat !== null && state.startOdometerLng !== null) {
+      return {
+        capturedAt: state.startOdometerCapturedAt ?? new Date().toISOString(),
+        lat: state.startOdometerLat,
+        lng: state.startOdometerLng,
+        accuracy: state.startOdometerAccuracy,
+      };
+    }
+
+    try {
+      const fix = await getGpsFix();
+      const capturedAt = state.startOdometerCapturedAt ?? new Date().toISOString();
+      updateAppState({
+        startOdometerCapturedAt: capturedAt,
+        startOdometerLat: fix.latitude,
+        startOdometerLng: fix.longitude,
+        startOdometerAccuracy: fix.accuracy,
+        shiftStartTime: state.shiftStartTime ?? new Date(capturedAt),
+      });
+      return {
+        capturedAt,
+        lat: fix.latitude,
+        lng: fix.longitude,
+        accuracy: fix.accuracy,
+      };
+    } catch (e) {
+      setStartError(
+        'Location is required for the odometer photo. Please allow Location for this site/app, then try again.'
+      );
+      return null;
+    }
+  };
 
   const handleContinue = async () => {
     setAttemptedSubmit(true);
@@ -49,11 +85,21 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
       return;
     }
 
+    const gps = await ensureStartOdometerGps();
+    if (!gps) {
+      return;
+    }
+
     updateAppState({
       odometerReading: reading,
       odometerPhoto: photoUri,
     });
-    const { shiftId, error, queued } = await startShift();
+    const { shiftId, error, queued } = await startShift({
+      odometerReading: reading,
+      odometerPhoto: photoUri,
+      capturedAt: gps.capturedAt,
+      location: { lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy },
+    });
     console.log('start shift response', { shiftId, error, queued });
     if (!shiftId) {
       setStartError(error ?? 'Unable to start shift.');
@@ -94,6 +140,13 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
         }}
         cameraOnly
         onCaptureMeta={(meta) => {
+          if (meta.locationDenied) {
+            setStartError(
+              'Location denied. Tap the address bar lock icon (or app settings) and allow Location, then try again.'
+            );
+          } else {
+            setStartError(null);
+          }
           updateAppState({
             startOdometerCapturedAt: meta.capturedAt,
             startOdometerLat: meta.location.lat,
@@ -108,7 +161,7 @@ export default function ReadingsAndPhotosScreen({ navigation }: ScreenProps<'Rea
         <Text style={{ marginTop: 8, color: '#6B7280' }}>Loading vehicle assignment...</Text>
       ) : vehicle ? (
         <Text style={{ marginTop: 8 }}>
-          Vehicle: {vehicle.registration ?? vehicle.rego ?? vehicle.plate_number ?? vehicle.name ?? 'Unknown registration'}
+          Vehicle: {vehicle.label ?? vehicle.registration ?? vehicle.rego ?? vehicle.plate_number ?? 'Unknown registration'}
         </Text>
       ) : (
         <Text style={{ color: '#D32F2F', marginTop: 8 }}>No vehicle assigned. Contact admin.</Text>

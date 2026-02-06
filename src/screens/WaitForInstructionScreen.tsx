@@ -4,7 +4,8 @@ import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import type { ScreenProps } from '../types/navigation';
 
-export default function WaitForInstructionScreen({ navigation }: ScreenProps<'WaitForInstruction'>) {
+export default function WaitForInstructionScreen(props: ScreenProps<'WaitForInstruction'>) {
+  const { navigation } = props;
   return (
     <ScreenContainer title="Awaiting instructions" subtitle="Your checklist flagged an issue">
       <View style={styles.card}>

@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase';
 export interface DriverRecord {
   id: string;
   name?: string | null;
-  user_id?: string | null;
   auth_user_id?: string | null;
 }
 
@@ -43,55 +42,45 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     setAuthUserId(userId);
 
-    // Try to resolve driver record by user_id or auth_user_id
-    let driver = null;
+    // Try to resolve driver record by auth_user_id
+    let driver: DriverRecord | null = null;
     try {
-      const { data, error } = await supabase.from('drivers').select('id, name, user_id, auth_user_id').or(`user_id.eq.${userId},auth_user_id.eq.${userId}`).maybeSingle();
+      const { data, error } = await supabase
+        .from('drivers')
+        .select('id, name, auth_user_id')
+        .eq('auth_user_id', userId)
+        .maybeSingle();
       if (error) {
-        console.warn('Error fetching driver record', { message: error.message });
+        console.warn('[Driver] Error fetching driver record by auth_user_id', { message: error.message });
       }
       driver = data ?? null;
     } catch (e) {
-      console.warn('Exception while fetching driver', e);
+      console.warn('[Driver] Exception while fetching driver by auth_user_id', e);
       driver = null;
     }
 
     setCurrentDriver(driver as DriverRecord | null);
 
+    // Use single source of truth: vehicles.assigned_driver_id = auth.uid()
     try {
-      const { data: assignment, error: assignmentError } = await supabase
-        .from('vehicle_assignments')
-        .select('vehicle_id, unassigned_at')
-        .eq('driver_id', userId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (assignmentError) {
-        console.warn('Error fetching vehicle assignment', { message: assignmentError.message });
-      }
-
-      if (!assignment || assignment.unassigned_at) {
-        setCurrentVehicle(null);
-        setLoading(false);
-        return;
-      }
-
       const { data: vehicle, error: vehicleError } = await supabase
         .from('vehicles')
         .select('id, registration, type, depot')
-        .eq('id', assignment.vehicle_id)
+        .eq('assigned_driver_id', userId)
+        .limit(1)
         .maybeSingle();
 
       if (vehicleError) {
-        console.warn('Error fetching assigned vehicle details', { message: vehicleError.message });
+        console.warn('[Driver] Error fetching assigned vehicle', { message: vehicleError.message });
+        setCurrentVehicle(null);
+      } else {
+        setCurrentVehicle(vehicle ?? null);
       }
-
-      setCurrentVehicle(vehicle ?? null);
       setLoading(false);
       return;
     } catch (e) {
-      console.warn('Exception while fetching assigned vehicle', e);
+      console.warn('[Driver] Exception while fetching assigned vehicle', e);
+      setCurrentVehicle(null);
     }
 
     setCurrentVehicle(null);
@@ -106,8 +95,11 @@ export function DriverProvider({ children }: { children: ReactNode }) {
 
     // initial resolver
     (async () => {
-      const session = supabase.auth.session();
-      await resolveDriverAndVehicle(session?.user?.id ?? null);
+      const { data, error } = await supabase.auth.getSession();
+      if (error) {
+        console.warn('[Driver] Error fetching session', { message: error.message });
+      }
+      await resolveDriverAndVehicle(data?.session?.user?.id ?? null);
     })();
 
     return () => data.subscription.unsubscribe();

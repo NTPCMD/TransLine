@@ -10,7 +10,8 @@ import { useAppState } from '../state/AppStateContext';
 import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
-export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) {
+export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
+  const { navigation } = props;
   const { closeActiveBreak, createEvent, endShift, state, resetShift, updateAppState } = useAppState();
   const [rubbishRemoved, setRubbishRemoved] = useState<'yes' | 'no' | null>(state.endShiftRubbishRemoved);
   const [endShiftNotes, setEndShiftNotes] = useState(state.endShiftNotes);
@@ -18,7 +19,8 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
   const [endOdometerPhoto, setEndOdometerPhoto] = useState<string | null>(null);
   const [endPhotoMeta, setEndPhotoMeta] = useState<{
     capturedAt: string;
-    location: { lat: number; lng: number; accuracy: number | null };
+    location: { lat: number | null; lng: number | null; accuracy: number | null };
+    locationDenied?: boolean;
   } | null>(null);
   const [startOdometerValue, setStartOdometerValue] = useState<number | null>(null);
   const [shiftLoadError, setShiftLoadError] = useState<string | null>(null);
@@ -70,6 +72,8 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
       Number.isInteger(Number(endOdometerReading)) &&
       endOdometerPhoto !== null &&
       endPhotoMeta !== null &&
+      endPhotoMeta.location.lat !== null &&
+      endPhotoMeta.location.lng !== null &&
       rubbishRemoved !== null
     );
   };
@@ -112,6 +116,14 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
     }
     if (!endPhotoMeta) {
       Alert.alert('Missing Information', 'Odometer photo metadata is missing. Please retake the photo.');
+      return;
+    }
+    const endLocation = endPhotoMeta.location;
+    if (endPhotoMeta.locationDenied || endLocation.lat === null || endLocation.lng === null) {
+      Alert.alert(
+        'Location required',
+        'Location is required for the final odometer photo. Please allow Location, then retake or try again.'
+      );
       return;
     }
     if (rubbishRemoved === null) {
@@ -169,7 +181,11 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
         endOdometerValue: odometerValue,
         endOdometerPhoto: endOdometerPhoto,
         capturedAt: endPhotoMeta.capturedAt,
-        location: endPhotoMeta.location,
+        location: {
+          lat: endLocation.lat,
+          lng: endLocation.lng,
+          accuracy: endLocation.accuracy,
+        },
       });
       if (!ended.ok) {
         Alert.alert('Unable to end shift', ended.error ?? 'Unable to end shift.');

@@ -7,7 +7,8 @@ import PhotoPicker from '../components/PhotoPicker';
 import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function FuelLogScreen({ navigation }: ScreenProps<'FuelLog'>) {
+export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
+  const { navigation } = props;
   const { createEvent, updateAppState } = useAppState();
   const [litres, setLitres] = useState('');
   const [cost, setCost] = useState('');

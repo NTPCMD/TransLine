@@ -1,5 +1,6 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { supabase } from '../lib/supabase';
+import { getAssignedVehicleForCurrentUser, getVehicleLabel } from '../lib/assignment';
 
 export type AssignmentStatus = 'loading' | 'assigned' | 'unassigned' | 'error';
 
@@ -14,10 +15,10 @@ export interface AssignedVehicle {
   registration?: string | null;
   rego?: string | null;
   plate_number?: string | null;
-  name?: string | null;
   type?: string | null;
   depot?: string | null;
   depot_name?: string | null;
+  label?: string; // Display label (from registration/rego/plate or vehicle ID)
 }
 
 interface AssignmentContextValue {
@@ -35,14 +36,29 @@ export function AssignmentProvider({ children }: { children: React.ReactNode }) 
   const [assignment, setAssignment] = useState<VehicleAssignment | null>(null);
   const [vehicle, setVehicle] = useState<AssignedVehicle | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const lastFetchAtRef = useRef<number>(0);
+  const FETCH_DEBOUNCE_MS = 2000; // Don't re-fetch more than once per 2 seconds
 
-  const fetchAssignment = useCallback(async () => {
+  const fetchAssignment = useCallback(async (force = false) => {
+    const now = Date.now();
+
+    // Debounce: skip if fetched recently (unless forced)
+    if (!force && now - lastFetchAtRef.current < FETCH_DEBOUNCE_MS) {
+      console.log(
+        '[Assignment] Skipping fetch (debounced, last fetch',
+        now - lastFetchAtRef.current,
+        'ms ago)'
+      );
+      return;
+    }
+
+    lastFetchAtRef.current = now;
     setStatus('loading');
     setError(null);
     try {
       const { data: sessionData } = await supabase.auth.getSession();
       const userId = sessionData?.session?.user?.id ?? null;
-      console.log('[Assignment] auth user', userId);
+      console.log('[Assignment] Auth user:', userId);
       if (!userId) {
         setAssignment(null);
         setVehicle(null);
@@ -50,75 +66,64 @@ export function AssignmentProvider({ children }: { children: React.ReactNode }) 
         return;
       }
 
-      const { data: assignmentRow, error: assignmentError } = await supabase
-        .from('vehicle_assignments')
-        .select('vehicle_id, unassigned_at, created_at')
-        .eq('driver_id', userId)
-        .is('unassigned_at', null)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      // Use single source of truth for assignment: vehicles.assigned_driver_id = auth.uid()
+      const { vehicle, assignmentSource, error: resolveError } = await getAssignedVehicleForCurrentUser();
 
-      console.log('[Assignment] assignment row', assignmentRow, assignmentError);
-
-      if (assignmentError) {
-        setError(assignmentError.message);
+      if (resolveError) {
+        console.error('[Assignment] Resolution error:', resolveError);
+        setError(resolveError);
         setStatus('error');
+        setAssignment(null);
+        setVehicle(null);
         return;
       }
 
-      if (!assignmentRow) {
+      console.log('[Assignment] Resolved vehicle:', vehicle?.id, 'via:', assignmentSource);
+
+      if (!vehicle) {
         setAssignment(null);
         setVehicle(null);
         setStatus('unassigned');
         return;
       }
 
-      setAssignment(assignmentRow);
-
-      const { data: vehicleRow, error: vehicleError } = await supabase
-        .from('vehicles')
-        .select('id, registration, rego, plate_number, name, type, depot, depot_name')
-        .eq('id', assignmentRow.vehicle_id)
-        .maybeSingle();
-
-      console.log('[Assignment] vehicle row', vehicleRow, vehicleError);
-
-      if (vehicleError) {
-        setError(vehicleError.message);
-        setVehicle(null);
-        setStatus('error');
-        return;
-      }
-
-      if (!vehicleRow) {
-        setVehicle(null);
-        setStatus('assigned');
-        return;
-      }
-
+      // Convert to expected format
       setVehicle({
-        ...vehicleRow,
-        registration:
-          vehicleRow.registration ??
-          vehicleRow.rego ??
-          vehicleRow.plate_number ??
-          null,
-        depot: vehicleRow.depot ?? vehicleRow.depot_name ?? null,
+        id: vehicle.id,
+        registration: vehicle.registration ?? null,
+        rego: vehicle.rego ?? null,
+        plate_number: vehicle.plate_number ?? null,
+        type: vehicle.type ?? null,
+        depot: vehicle.depot ?? vehicle.depot_name ?? null,
+        depot_name: vehicle.depot_name ?? null,
+        label: getVehicleLabel(vehicle),
       });
+
+      // Set a synthetic assignment record
+      setAssignment({
+        vehicle_id: vehicle.id,
+        unassigned_at: null,
+        created_at: new Date().toISOString(),
+      });
+
       setStatus('assigned');
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Failed to load assignment.';
+      console.error('[Assignment] Error:', message);
       setError(message);
       setStatus('error');
     }
   }, []);
 
   useEffect(() => {
-    fetchAssignment();
+    // Force initial fetch on mount
+    fetchAssignment(true);
+    
+    // Re-fetch on auth state change (without debounce)
     const { data } = supabase.auth.onAuthStateChange(() => {
-      fetchAssignment();
+      fetchAssignment(true);
     });
+    
     return () => {
       data.subscription.unsubscribe();
     };

@@ -17,7 +17,8 @@ import { supabase } from '../lib/supabase';
 import { pushNotificationManager } from '../lib/pushNotifications';
 import type { ScreenProps } from '../types/navigation';
 
-export default function ProfileScreen({ navigation }: ScreenProps<'Profile'>) {
+export default function ProfileScreen(props: ScreenProps<'Profile'>) {
+  const { navigation } = props;
   const { currentDriver, authUserId } = useDriver();
   const { state, updateAppState, resetShift } = useAppState();
   const [loading, setLoading] = useState(true);

@@ -6,7 +6,8 @@ import { useAppState } from '../state/AppStateContext';
 import { useActiveAssignment } from '../state/AssignmentContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function DriverDeclarationScreen({ navigation }: ScreenProps<'DriverDeclaration'>) {
+export default function DriverDeclarationScreen(props: ScreenProps<'DriverDeclaration'>) {
+  const { navigation } = props;
   const { updateAppState } = useAppState();
   const { status, vehicle } = useActiveAssignment();
 

@@ -12,7 +12,8 @@ const DEFAULT_BREAK_SECONDS = 15 * 60; // 15 minutes default
 
 type BreakStatus = 'idle' | 'running' | 'paused';
 
-export default function BreakControlScreen({ navigation }: ScreenProps<'BreakControl'>) {
+export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
+  const { navigation } = props;
   const { closeActiveBreak, createEvent, state, updateAppState } = useAppState();
   const [status, setStatus] = useState<BreakStatus>('idle');
   const [secondsElapsed, setSecondsElapsed] = useState(0);
