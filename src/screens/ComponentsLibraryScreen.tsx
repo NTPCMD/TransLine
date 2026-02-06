@@ -11,7 +11,8 @@ const components = [
   'Training videos',
 ];
 
-export default function ComponentsLibraryScreen({ navigation }: ScreenProps<'ComponentsLibrary'>) {
+export default function ComponentsLibraryScreen(props: ScreenProps<'ComponentsLibrary'>) {
+  const { navigation } = props;
   return (
     <ScreenContainer title="Components library" subtitle="Helpful resources for drivers">
       <View style={styles.card}>

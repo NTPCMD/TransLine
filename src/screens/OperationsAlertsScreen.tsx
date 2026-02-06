@@ -10,7 +10,8 @@ const alerts = [
   'Check tyre pressures after long highway sections.',
 ];
 
-export default function OperationsAlertsScreen({ navigation }: ScreenProps<'OperationsAlerts'>) {
+export default function OperationsAlertsScreen(props: ScreenProps<'OperationsAlerts'>) {
+  const { navigation } = props;
   return (
     <ScreenContainer title="Operations alerts" subtitle="Live notices from operations">
       <View style={styles.card}>

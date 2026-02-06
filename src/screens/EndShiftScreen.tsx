@@ -10,15 +10,42 @@ import { useAppState } from '../state/AppStateContext';
 import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
-export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) {
+export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
+  const { navigation } = props;
   const { closeActiveBreak, createEvent, endShift, state, resetShift, updateAppState } = useAppState();
   const [rubbishRemoved, setRubbishRemoved] = useState<'yes' | 'no' | null>(state.endShiftRubbishRemoved);
   const [endShiftNotes, setEndShiftNotes] = useState(state.endShiftNotes);
   const [endOdometerReading, setEndOdometerReading] = useState('');
   const [endOdometerPhoto, setEndOdometerPhoto] = useState<string | null>(null);
+  const [endPhotoMeta, setEndPhotoMeta] = useState<{
+    capturedAt: string;
+    location: { lat: number | null; lng: number | null; accuracy: number | null };
+    locationDenied?: boolean;
+  } | null>(null);
+  const [startOdometerValue, setStartOdometerValue] = useState<number | null>(null);
+  const [shiftLoadError, setShiftLoadError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
+    const loadShift = async () => {
+      if (!state.activeShiftId) return;
+      const { data, error } = await supabase
+        .from('shifts')
+        .select('start_odometer, end_odometer')
+        .eq('id', state.activeShiftId)
+        .maybeSingle();
+      if (error) {
+        setShiftLoadError(error.message);
+        return;
+      }
+      setStartOdometerValue(data?.start_odometer ?? null);
+      if (data?.end_odometer) {
+        setShiftLoadError('End odometer already captured.');
+      }
+    };
+
+    loadShift();
+
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
       if (!isSubmitting) {
         return;
@@ -27,7 +54,7 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
     });
 
     return unsubscribe;
-  }, [isSubmitting, navigation]);
+  }, [isSubmitting, navigation, state.activeShiftId]);
 
   const handleRubbishChange = (value: 'yes' | 'no') => {
     setRubbishRemoved(value);
@@ -42,11 +69,33 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
   const isFormValid = () => {
     return (
       endOdometerReading.trim() !== '' &&
-      !isNaN(Number(endOdometerReading)) &&
+      Number.isInteger(Number(endOdometerReading)) &&
       endOdometerPhoto !== null &&
+      endPhotoMeta !== null &&
+      endPhotoMeta.location.lat !== null &&
+      endPhotoMeta.location.lng !== null &&
       rubbishRemoved !== null
     );
   };
+
+  const computeDistance = () => {
+    const startValue = startOdometerValue ?? Number(state.odometerReading);
+    const endValue = Number(endOdometerReading);
+    if (Number.isNaN(endValue) || startValue === null || Number.isNaN(startValue)) return null;
+    return endValue - startValue;
+  };
+
+  const confirmDistance = async (distanceKm: number) =>
+    new Promise<boolean>((resolve) => {
+      Alert.alert(
+        'Confirm distance',
+        `Distance for this shift: ${distanceKm.toFixed(1)} km`,
+        [
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
+          { text: 'Confirm', onPress: () => resolve(true) },
+        ]
+      );
+    });
 
   const handleConfirm = async () => {
     if (isSubmitting) return;
@@ -57,12 +106,24 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
       return;
     }
     const odometerValue = Number(endOdometerReading);
-    if (isNaN(odometerValue)) {
-      Alert.alert('Invalid Input', 'Please enter a valid numeric odometer reading.');
+    if (!Number.isInteger(odometerValue)) {
+      Alert.alert('Invalid Input', 'Please enter a valid whole-number odometer reading.');
       return;
     }
     if (!endOdometerPhoto) {
       Alert.alert('Missing Information', 'Please take a photo of the final odometer reading.');
+      return;
+    }
+    if (!endPhotoMeta) {
+      Alert.alert('Missing Information', 'Odometer photo metadata is missing. Please retake the photo.');
+      return;
+    }
+    const endLocation = endPhotoMeta.location;
+    if (endPhotoMeta.locationDenied || endLocation.lat === null || endLocation.lng === null) {
+      Alert.alert(
+        'Location required',
+        'Location is required for the final odometer photo. Please allow Location, then retake or try again.'
+      );
       return;
     }
     if (rubbishRemoved === null) {
@@ -74,34 +135,28 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
       Alert.alert('Unable to end shift', 'No active shift found.');
       return;
     }
+
+    if (startOdometerValue === null && !state.odometerReading) {
+      Alert.alert('Unable to end shift', 'Start odometer is missing. Please capture it before ending the shift.');
+      return;
+    }
+
+    const startValue = startOdometerValue ?? Number(state.odometerReading);
+    if (odometerValue < startValue) {
+      Alert.alert('Invalid Input', 'Final odometer must be greater than or equal to the start odometer.');
+      return;
+    }
+
+    const distanceKm = odometerValue - startValue;
+    const confirmed = await confirmDistance(distanceKm);
+    if (!confirmed) {
+      return;
+    }
     
     setIsSubmitting(true);
     let shouldReset = true;
     
     try {
-      // Upload end odometer photo to Supabase Storage
-      let endOdometerPhotoUrl: string | null = null;
-      if (endOdometerPhoto && (endOdometerPhoto.startsWith('file:') || endOdometerPhoto.startsWith('data:'))) {
-        try {
-          const resp = await fetch(endOdometerPhoto);
-          const blob = await resp.blob();
-          const ext = endOdometerPhoto.split('.').pop() ?? 'jpg';
-          const key = `odometer/end_${(state.driverRecordId ?? state.userId) as string}_${Date.now()}.${ext}`;
-          const { error: uploadErr } = await supabase.storage.from('odometer-photos').upload(key, blob);
-          if (uploadErr) {
-            Alert.alert('Upload Failed', 'Failed to upload end odometer photo. Please try again.');
-            setIsSubmitting(false);
-            return;
-          }
-          const { data: publicData } = supabase.storage.from('odometer-photos').getPublicUrl(key);
-          endOdometerPhotoUrl = publicData?.publicUrl ?? null;
-        } catch (e) {
-          Alert.alert('Upload Failed', 'Failed to upload end odometer photo. Please try again.');
-          setIsSubmitting(false);
-          return;
-        }
-      }
-      
       if (state.isOnBreak) {
         await closeActiveBreak();
       }
@@ -110,11 +165,11 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
         'shift_end',
         { 
           end_shift_notes: endShiftNotes,
-          end_odometer_reading: odometerValue,
-          end_odometer_photo_url: endOdometerPhotoUrl,
+          end_odometer_value: odometerValue,
+          distance_km: distanceKm,
           rubbish_removed: rubbishRemoved === 'yes'
         },
-        { queueOnError: false }
+        { queueOnError: true }
       );
       
       if (shiftEndResult.status === 'error') {
@@ -122,10 +177,22 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
         return;
       }
       
-      const ended = await endShift();
+      const ended = await endShift({
+        endOdometerValue: odometerValue,
+        endOdometerPhoto: endOdometerPhoto,
+        capturedAt: endPhotoMeta.capturedAt,
+        location: {
+          lat: endLocation.lat,
+          lng: endLocation.lng,
+          accuracy: endLocation.accuracy,
+        },
+      });
       if (!ended.ok) {
         Alert.alert('Unable to end shift', ended.error ?? 'Unable to end shift.');
         return;
+      }
+      if (ended.queued) {
+        Alert.alert('Saved offline', 'End of shift details saved offline. They will sync when you are online.');
       }
       
       resetShift();
@@ -148,6 +215,7 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
         <Text style={styles.text}>Vehicle: {state.vehicleRegistration ?? state.assignedVehicle?.registration ?? 'Unknown'}</Text>
         <Text style={styles.text}>Start time: {state.shiftStartTime ? state.shiftStartTime.toLocaleTimeString() : 'Not set'}</Text>
         <Text style={styles.text}>Start Odometer: {state.odometerReading || 'Pending'}</Text>
+        {shiftLoadError ? <Text style={styles.errorText}>{shiftLoadError}</Text> : null}
       </InfoCard>
       
       <InfoCard title="Final Odometer Reading">
@@ -158,11 +226,21 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
           keyboardType="numeric"
           placeholder="Enter the final odometer reading"
         />
-        <PhotoPicker 
-          label="Final odometer photo (required)" 
-          uri={endOdometerPhoto} 
-          onChange={setEndOdometerPhoto} 
+        <PhotoPicker
+          label="Final odometer photo (required)"
+          uri={endOdometerPhoto}
+          onChange={(uri) => {
+            setEndOdometerPhoto(uri);
+            if (!uri) {
+              setEndPhotoMeta(null);
+            }
+          }}
+          cameraOnly
+          onCaptureMeta={(meta) => setEndPhotoMeta(meta)}
         />
+        {computeDistance() !== null && (startOdometerValue !== null || state.odometerReading) ? (
+          <Text style={styles.distanceText}>Distance: {computeDistance()?.toFixed(1)} km</Text>
+        ) : null}
       </InfoCard>
       
       <InfoCard title="End of shift checklist">
@@ -193,7 +271,7 @@ export default function EndShiftScreen({ navigation }: ScreenProps<'EndShift'>) 
       <Button 
         label={isSubmitting ? 'Ending...' : 'Confirm end'} 
         onPress={handleConfirm} 
-        disabled={isSubmitting || !isFormValid()} 
+        disabled={isSubmitting || !isFormValid() || Boolean(shiftLoadError)} 
       />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
     </ScreenContainer>
@@ -204,6 +282,15 @@ const styles = StyleSheet.create({
   text: {
     color: '#111827',
     fontSize: 16,
+  },
+  errorText: {
+    color: '#D32F2F',
+    marginTop: 8,
+  },
+  distanceText: {
+    color: '#111827',
+    marginTop: 8,
+    fontWeight: '600',
   },
   label: {
     color: '#2E2E2E',

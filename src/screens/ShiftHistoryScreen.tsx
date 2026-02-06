@@ -19,19 +19,20 @@ interface Shift {
   status: string;
   started_at: string;
   ended_at: string | null;
-  odometer_reading: number | null;
-  end_odometer_reading: number | null;
+  start_odometer: number | null;
+  end_odometer: number | null;
   vehicle_registration?: string;
 }
 
-export default function ShiftHistoryScreen({ navigation }: ScreenProps<'ShiftHistory'>) {
-  const { currentDriver } = useDriver();
+export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
+  const { navigation } = props;
+  const { authUserId } = useDriver();
   const [shifts, setShifts] = useState<Shift[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
 
   const loadShifts = useCallback(async () => {
-    if (!currentDriver?.id) {
+    if (!authUserId) {
       setLoading(false);
       return;
     }
@@ -46,11 +47,11 @@ export default function ShiftHistoryScreen({ navigation }: ScreenProps<'ShiftHis
           status,
           started_at,
           ended_at,
-          odometer_reading,
-          end_odometer_reading,
+          start_odometer,
+          end_odometer,
           vehicles!inner(registration)
         `)
-        .eq('driver_id', currentDriver.id)
+        .eq('driver_id', authUserId)
         .order('started_at', { ascending: false })
         .limit(50);
 
@@ -70,7 +71,7 @@ export default function ShiftHistoryScreen({ navigation }: ScreenProps<'ShiftHis
       setLoading(false);
       setRefreshing(false);
     }
-  }, [currentDriver?.id]);
+  }, [authUserId]);
 
   useEffect(() => {
     loadShifts();
@@ -213,16 +214,16 @@ export default function ShiftHistoryScreen({ navigation }: ScreenProps<'ShiftHis
             {calculateDuration(shift.started_at, shift.ended_at)}
           </Text>
         </View>
-        {shift.odometer_reading && (
+        {shift.start_odometer !== null && (
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>Start Odometer:</Text>
-            <Text style={styles.detailValue}>{shift.odometer_reading} km</Text>
+            <Text style={styles.detailValue}>{shift.start_odometer} km</Text>
           </View>
         )}
-        {shift.end_odometer_reading && (
+        {shift.end_odometer !== null && (
           <View style={styles.detailRow}>
             <Text style={styles.detailLabel}>End Odometer:</Text>
-            <Text style={styles.detailValue}>{shift.end_odometer_reading} km</Text>
+            <Text style={styles.detailValue}>{shift.end_odometer} km</Text>
           </View>
         )}
       </View>

@@ -9,7 +9,8 @@ import { useAppState } from '../state/AppStateContext';
 import { useDriver } from '../state/DriverContext';
 import type { ScreenProps } from '../types/navigation';
 
-export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShift'>) {
+export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
+  const { navigation } = props;
   const { state } = useAppState();
   const { currentDriver: driver, currentVehicle: assigned } = useDriver();
   const [now, setNow] = useState(Date.now());
