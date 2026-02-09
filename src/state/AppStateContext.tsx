@@ -891,12 +891,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
     }
 
-    const profileResolution = await resolveProfileId(resolvedUserId);
-    const profileId = profileResolution.profileId;
-    if (!profileId) {
-      return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
-    }
-
     const driverIdCandidates = [profileId];
 
     const vehicleIdToUse = vehicleIdOverride ?? state.vehicleId;
