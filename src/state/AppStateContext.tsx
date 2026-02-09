@@ -4,6 +4,7 @@ import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
 import { useDriver } from './DriverContext';
 import { useActiveAssignment } from './AssignmentContext';
+import { getAssignedVehicleForCurrentUser } from '../lib/assignment';
 import { getGpsFix } from '../lib/gps';
 import { networkMonitor } from '../lib/networkMonitor';
 import { offlineQueue } from '../lib/offlineQueue';
@@ -59,14 +60,18 @@ interface AppStateContextValue {
   state: AppState;
   updateAppState: (updates: Partial<AppState>) => void;
   resetShift: () => void;
+  refreshCurrentVehicle: () => Promise<void>;
   submitPreStartChecklist: (payload: {
     answers: ChecklistAnswer[];
     hasFailures: boolean;
     hasCriticalFailures: boolean;
+    assignmentVehicleId?: string | null;
   }) => Promise<{ ok: boolean; shiftId?: string | null; error?: string; queued?: boolean }>;
   startShift: (payload?: {
     odometerReading: string;
     odometerPhoto: string;
+    odometerPhotoPath?: string;
+    skipOdometerLog?: boolean;
     capturedAt?: string;
     location?: { lat: number; lng: number; accuracy: number | null };
   }) => Promise<{ shiftId: string | null; error?: string; queued?: boolean }>;
@@ -167,6 +172,29 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       queuedEventsCount: prev.queuedEventsCount,
     }));
   };
+
+  const refreshCurrentVehicle = useCallback(async () => {
+    try {
+      const { vehicle, error } = await getAssignedVehicleForCurrentUser();
+      if (error) {
+        console.warn('[Assignment] Refresh vehicle details failed:', error);
+      }
+      setState(prev => ({
+        ...prev,
+        vehicleId: vehicle?.id ?? null,
+        assignedVehicle: vehicle
+          ? {
+              registration: vehicle.registration ?? null,
+              type: vehicle.type ?? null,
+              depot: vehicle.depot ?? vehicle.depot_name ?? null,
+            }
+          : null,
+        vehicleRegistration: vehicle?.registration ?? null,
+      }));
+    } catch (err) {
+      console.warn('[Assignment] Refresh vehicle details error:', err);
+    }
+  }, []);
   const { authUserId, currentDriver } = useDriver();
   const { status: assignmentStatus, vehicle: assignedVehicle } = useActiveAssignment();
 
@@ -328,6 +356,69 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     } catch {
       return null;
     }
+  };
+
+  const resolveDriverRecordId = async (authUserId: string | null) => {
+    if (!authUserId) {
+      return { driverRecordId: null as string | null, error: 'User not available.' };
+    }
+
+    const { data, error } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('auth_user_id', authUserId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[DriverResolve] Failed to resolve driver record', {
+        authUserId,
+        message: error.message,
+      });
+      return { driverRecordId: null as string | null, error: error.message };
+    }
+
+    if (!data?.id) {
+      console.warn('[DriverResolve] No driver record found', { authUserId });
+      return { driverRecordId: null as string | null, error: 'Driver profile not available.' };
+    }
+
+    console.log('[DriverResolve] Resolved driver record', {
+      authUserId,
+      driverRecordId: data.id,
+    });
+
+    if (state.driverRecordId !== data.id) {
+      setState(prev => ({ ...prev, driverRecordId: data.id }));
+    }
+
+    return { driverRecordId: data.id, error: null as string | null };
+  };
+
+  const resolveProfileId = async (authUserId: string | null) => {
+    if (!authUserId) {
+      return { profileId: null as string | null, error: 'User not available.' };
+    }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('auth_user_id', authUserId)
+      .maybeSingle();
+
+    if (error) {
+      console.warn('[ProfileResolve] Failed to resolve profile', {
+        authUserId,
+        message: error.message,
+      });
+      return { profileId: null as string | null, error: error.message };
+    }
+
+    if (!data?.id) {
+      console.warn('[ProfileResolve] No profile record found', { authUserId });
+      return { profileId: null as string | null, error: 'Profile not available.' };
+    }
+
+    return { profileId: data.id, error: null as string | null };
   };
 
   const loadWriteQueue = async (): Promise<QueuedWrite[]> => {
@@ -695,7 +786,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         occurred_at: occurredAt,
         lat: location?.coords.latitude ?? null,
         lng: location?.coords.longitude ?? null,
-        heading: location?.coords.heading ?? null,
         metadata,
       };
 
@@ -724,7 +814,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             vehicle_id: vehicleId,
             lat: location?.coords.latitude ?? null,
             lng: location?.coords.longitude ?? null,
-            heading: location?.coords.heading ?? null,
             metadata,
           });
           return { status: 'queued' as const, error: 'Device is offline' };
@@ -745,7 +834,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             vehicle_id: vehicleId,
             lat: location?.coords.latitude ?? null,
             lng: location?.coords.longitude ?? null,
-            heading: location?.coords.heading ?? null,
             metadata,
           });
           return { status: 'queued' as const, error: error.message };
@@ -785,33 +873,62 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     [processEventQueue, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]
   );
 
-  const ensureActiveShift = useCallback(async () => {
+  const ensureActiveShift = useCallback(async (vehicleIdOverride?: string | null) => {
     const resolvedUserId = await resolveAuthUserId();
     if (!resolvedUserId) {
       return { shiftId: null, error: 'User not available.' };
     }
 
-    const driverRecordId = state.driverRecordId;
+    const driverResolution = await resolveDriverRecordId(resolvedUserId);
+    const driverRecordId = driverResolution.driverRecordId;
     if (!driverRecordId) {
-      return { shiftId: null, error: 'Driver profile not available.' };
+      return { shiftId: null, error: driverResolution.error ?? 'Driver profile not available.' };
     }
 
-    const driverIdCandidates = [driverRecordId];
-    if (resolvedUserId && resolvedUserId !== driverRecordId) {
-      driverIdCandidates.push(resolvedUserId);
+    const profileResolution = await resolveProfileId(resolvedUserId);
+    const profileId = profileResolution.profileId;
+    if (!profileId) {
+      return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
     }
 
-    if (!state.vehicleId) {
-      return { shiftId: null, error: 'No vehicle assigned. Contact admin.' };
+    const profileResolution = await resolveProfileId(resolvedUserId);
+    const profileId = profileResolution.profileId;
+    if (!profileId) {
+      return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
     }
+
+    const driverIdCandidates = [profileId];
+
+    const vehicleIdToUse = vehicleIdOverride ?? state.vehicleId;
+    if (!vehicleIdToUse) {
+      return { shiftId: null, error: 'No vehicle assigned. Refresh assignment to continue.' };
+    }
+
+    const isOnline = await networkMonitor.isOnline();
 
     if (state.activeShiftId) {
-      return { shiftId: state.activeShiftId, driverId: driverRecordId };
+      if (isOnline) {
+        const { data, error } = await supabase
+          .from('shifts')
+          .select('id, vehicle_id, driver_id')
+          .eq('id', state.activeShiftId)
+          .maybeSingle();
+
+        if (!error && data) {
+          return {
+            shiftId: data.id,
+            driverId: data.driver_id ?? profileId,
+            shiftVehicleId: data.vehicle_id ?? vehicleIdToUse,
+          };
+        }
+      }
+
+      return { shiftId: state.activeShiftId, driverId: profileId, shiftVehicleId: vehicleIdToUse };
     }
 
     let activeShift: { id: string; vehicle_id: string | null; driver_id: string | null } | null = null;
     let activeShiftError: string | null = null;
-    let activeShiftDriverId = driverRecordId;
+    let activeShiftDriverId = profileId;
 
     for (const candidateDriverId of driverIdCandidates) {
       const { data, error } = await supabase
@@ -842,38 +959,61 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (activeShift) {
-      if (activeShift.vehicle_id && activeShift.vehicle_id !== state.vehicleId) {
-        return { shiftId: null, error: 'Active shift is assigned to a different vehicle.' };
-      }
       setState(prev => ({ ...prev, activeShiftId: activeShift.id }));
-      return { shiftId: activeShift.id, driverId: activeShift.driver_id ?? activeShiftDriverId };
+      return {
+        shiftId: activeShift.id,
+        driverId: activeShift.driver_id ?? activeShiftDriverId,
+        shiftVehicleId: activeShift.vehicle_id ?? vehicleIdToUse,
+      };
     }
-
-    const isOnline = await networkMonitor.isOnline();
     if (!isOnline) {
       const localShiftId = generateUuid();
-      const queuedDriverId = driverRecordId;
+      const queuedDriverId = profileId;
       await queueWrite({
         id: `${Date.now()}-create-shift`,
         type: 'create_shift',
         payload: {
           shift_id: localShiftId,
           driver_id: queuedDriverId,
-          vehicle_id: state.vehicleId,
+          vehicle_id: vehicleIdToUse,
           status: 'pending',
         },
       });
       setState(prev => ({ ...prev, activeShiftId: localShiftId }));
-      return { shiftId: localShiftId, driverId: queuedDriverId, queued: true };
+      return { shiftId: localShiftId, driverId: queuedDriverId, queued: true, shiftVehicleId: vehicleIdToUse };
+    }
+
+    const { data: driverRow, error: driverRowError } = await supabase
+      .from('drivers')
+      .select('id')
+      .eq('id', driverRecordId)
+      .maybeSingle();
+    if (driverRowError) {
+      console.warn('[ShiftInsert] Failed to confirm driver record', {
+        driverRecordId,
+        message: driverRowError.message,
+      });
+      return { shiftId: null, error: driverRowError.message };
+    }
+    if (!driverRow?.id) {
+      console.warn('[ShiftInsert] Driver record missing at insert time', { driverRecordId });
+      return { shiftId: null, error: 'Driver profile not available.' };
     }
 
     let insertError: string | null = null;
     for (const candidateDriverId of driverIdCandidates) {
+      console.log('[ShiftInsert]', {
+        driverRecordId,
+        profileId,
+        authUid: resolvedUserId,
+        vehicleId: vehicleIdToUse,
+        candidateDriverId,
+      });
       const { data, error } = await supabase
         .from('shifts')
         .insert({
-          driver_id: driverRecordId,
-          vehicle_id: state.vehicleId,
+          driver_id: profileId,
+          vehicle_id: vehicleIdToUse,
           status: 'pending',
         })
         .select('id')
@@ -882,7 +1022,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       if (!error) {
         const shiftId = data?.id ?? null;
         setState(prev => ({ ...prev, activeShiftId: shiftId }));
-        return { shiftId, driverId: driverRecordId };
+        return { shiftId, driverId: profileId, shiftVehicleId: vehicleIdToUse };
       }
 
       insertError = `Shift insert failed: ${error.message}`;
@@ -892,21 +1032,29 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     return { shiftId: null, error: insertError ?? 'Unable to create shift.' };
-  }, [state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
+  }, [resolveDriverRecordId, resolveProfileId, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
 
   const submitPreStartChecklist = useCallback(
-    async (payload: { answers: ChecklistAnswer[]; hasFailures: boolean; hasCriticalFailures: boolean }) => {
+    async (payload: {
+      answers: ChecklistAnswer[];
+      hasFailures: boolean;
+      hasCriticalFailures: boolean;
+      assignmentVehicleId?: string | null;
+    }) => {
       const resolvedUserId = await resolveAuthUserId();
       if (!resolvedUserId) {
         return { ok: false, shiftId: null, error: 'User not available.' };
       }
 
-      const driverRecordId = state.driverRecordId;
+      const driverResolution = await resolveDriverRecordId(resolvedUserId);
+      const driverRecordId = driverResolution.driverRecordId;
       if (!driverRecordId) {
-        return { ok: false, shiftId: null, error: 'Driver profile not available.' };
+        return { ok: false, shiftId: null, error: driverResolution.error ?? 'Driver profile not available.' };
       }
 
-      const { shiftId, error, queued, driverId } = await ensureActiveShift();
+      const { shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(
+        payload.assignmentVehicleId ?? null
+      );
       if (!shiftId || error) {
         return { ok: false, shiftId: null, error };
       }
@@ -915,13 +1063,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         return { ok: false, shiftId: null, error: 'User not available.' };
       }
 
+      if (!shiftVehicleId) {
+        return { ok: false, shiftId: null, error: 'Active shift vehicle not available. Refresh assignment.' };
+      }
+
       const submissionId = generateUuid();
       const submittedAt = new Date().toISOString();
       const checklistPayload = {
         id: submissionId,
         shift_id: shiftId,
         driver_id: driverRecordId,
-        vehicle_id: state.vehicleId as string,
+        vehicle_id: shiftVehicleId,
         submitted_at: submittedAt,
         has_failures: payload.hasFailures,
         has_critical_failures: payload.hasCriticalFailures,
@@ -953,17 +1105,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       }));
       return { ok: true, shiftId, queued };
     },
-    [ensureActiveShift, state.driverRecordId, state.vehicleId]
+    [ensureActiveShift, resolveDriverRecordId, state.driverRecordId]
   );
 
   const startShift = useCallback(async (payload?: {
     odometerReading: string;
     odometerPhoto: string;
+    odometerPhotoPath?: string;
+    skipOdometerLog?: boolean;
     capturedAt?: string;
     location?: { lat: number; lng: number; accuracy: number | null };
   }) => {
-    if (!state.checklistSubmitted) {
-      return { shiftId: null, error: 'Complete the checklist before capturing the odometer.' };
+    if (!state.checklistSubmitted && state.preStartChecklistAnswers.length === 0) {
+      console.warn('Starting shift without checklist state set.');
     }
 
     const resolvedUserId = await resolveAuthUserId();
@@ -971,17 +1125,67 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId: null, error: 'User not available.' };
     }
 
-    const driverRecordId = state.driverRecordId;
+    const driverResolution = await resolveDriverRecordId(resolvedUserId);
+    const driverRecordId = driverResolution.driverRecordId;
     if (!driverRecordId) {
-      return { shiftId: null, error: 'Driver profile not available.' };
+      return { shiftId: null, error: driverResolution.error ?? 'Driver profile not available.' };
     }
 
-    if (!state.vehicleId) {
-      return { shiftId: null, error: 'No vehicle assigned. Contact admin.' };
+    const { vehicle: assignmentVehicle, error: assignmentError } = await getAssignedVehicleForCurrentUser();
+    const assignmentVehicleId = assignmentVehicle?.id ?? null;
+    if (!assignmentVehicleId) {
+      return {
+        shiftId: null,
+        error: assignmentError ?? 'No active vehicle assignment. Refresh assignment to continue.',
+      };
+    }
+
+    const { data: activeShift, error: activeShiftError } = await supabase
+      .from('shifts')
+      .select('id, vehicle_id, status, ended_at')
+      .eq('driver_id', profileId)
+      .or('ended_at.is.null,status.in.(pending,active)')
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (activeShiftError) {
+      console.warn('[ShiftGuard] Failed to fetch active shift', { message: activeShiftError.message });
+    }
+
+    console.log('[ShiftGuard]', {
+      driverRecordId,
+      profileId,
+      assignmentVehicleId,
+      dbActiveShiftId: activeShift?.id ?? null,
+      dbVehicleId: activeShift?.vehicle_id ?? null,
+      localActiveShiftId: state.activeShiftId,
+    });
+
+    if (!activeShift) {
+      setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
+    } else if (activeShift.vehicle_id && activeShift.vehicle_id !== assignmentVehicleId) {
+      console.warn('[ShiftMismatch] Auto-closing mismatched shift', {
+        shiftId: activeShift.id,
+        fromVehicle: activeShift.vehicle_id,
+        toVehicle: assignmentVehicleId,
+      });
+
+      await supabase
+        .from('shifts')
+        .update({
+          ended_at: new Date().toISOString(),
+          status: 'auto_closed_vehicle_mismatch',
+          admin_ended_reason: 'vehicle_mismatch_auto_close',
+        })
+        .eq('id', activeShift.id);
+
+      setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
     }
 
     const odometerReading = payload?.odometerReading ?? state.odometerReading;
     const odometerPhoto = payload?.odometerPhoto ?? state.odometerPhoto;
+    const uploadedPhotoPath = payload?.odometerPhotoPath ?? null;
+    const skipOdometerLog = payload?.skipOdometerLog ?? false;
 
     if (payload?.odometerReading || payload?.odometerPhoto) {
       setState(prev => ({
@@ -1006,11 +1210,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     let startAccuracy = payload?.location?.accuracy ?? state.startOdometerAccuracy;
 
     if (!capturedAt) {
-      capturedAt = new Date().toISOString();
+      const newCapturedAt = new Date().toISOString();
+      capturedAt = newCapturedAt;
       setState(prev => ({
         ...prev,
-        startOdometerCapturedAt: capturedAt,
-        shiftStartTime: prev.shiftStartTime ?? new Date(capturedAt),
+        startOdometerCapturedAt: newCapturedAt,
+        shiftStartTime: prev.shiftStartTime ?? new Date(newCapturedAt),
       }));
     }
 
@@ -1041,7 +1246,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       }));
     }
 
-    const { shiftId, error, queued, driverId } = await ensureActiveShift();
+    let { shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(assignmentVehicleId);
     if (!shiftId || error) {
       return { shiftId: null, error };
     }
@@ -1050,12 +1255,67 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId: null, error: 'User not available.' };
     }
 
+    if (!shiftVehicleId && !assignmentVehicleId) {
+      return { shiftId: null, error: 'Active shift vehicle not available. Refresh assignment.' };
+    }
+
+    if (shiftVehicleId && assignmentVehicleId && shiftVehicleId !== assignmentVehicleId) {
+      let existingShift: { id: string; vehicle_id: string | null } | null = null;
+      if (shiftId) {
+        const { data: shiftData, error: shiftFetchError } = await supabase
+          .from('shifts')
+          .select('id, vehicle_id')
+          .eq('id', shiftId)
+          .maybeSingle();
+        if (shiftFetchError) {
+          console.warn('[ShiftMismatch] Failed to fetch active shift', { message: shiftFetchError.message });
+        } else {
+          existingShift = shiftData ?? null;
+        }
+      }
+
+      console.log('[ShiftMismatch]', {
+        activeShiftId: existingShift?.id ?? shiftId ?? state.activeShiftId,
+        activeShiftVehicleId: existingShift?.vehicle_id ?? shiftVehicleId,
+        assignmentVehicleId,
+      });
+
+      if (existingShift?.id && existingShift.vehicle_id && existingShift.vehicle_id !== assignmentVehicleId) {
+        console.warn('[ShiftMismatch] Auto-closing mismatched shift', {
+          shiftId: existingShift.id,
+          fromVehicle: existingShift.vehicle_id,
+          toVehicle: assignmentVehicleId,
+        });
+
+        await supabase
+          .from('shifts')
+          .update({
+            ended_at: new Date().toISOString(),
+            status: 'auto_closed_vehicle_mismatch',
+            admin_ended_reason: 'vehicle_mismatch_auto_close',
+          })
+          .eq('id', existingShift.id);
+
+        setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
+      }
+
+      ({ shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(assignmentVehicleId));
+      if (!shiftId || error) {
+        return { shiftId: null, error: error ?? 'Unable to create shift.' };
+      }
+    }
+
+    const effectiveShiftVehicleId = shiftVehicleId ?? assignmentVehicleId;
+    if (!effectiveShiftVehicleId) {
+      return { shiftId: null, error: 'Active shift vehicle not available. Refresh assignment.' };
+    }
+
     const isOnline = await networkMonitor.isOnline();
     const startPayload = {
       log_id: generateUuid(),
       shift_id: shiftId,
       driver_id: driverRecordId,
-      vehicle_id: state.vehicleId,
+      vehicle_id: effectiveShiftVehicleId,
       odometer_value: odometerValue,
       photo_uri: odometerPhoto,
       captured_at: capturedAt,
@@ -1070,11 +1330,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId, queued: true };
     }
 
-    let odometerPhotoPath: string | null = null;
-    try {
-      odometerPhotoPath = await uploadOdometerPhoto(odometerPhoto, shiftId, 'start', resolvedUserId);
-    } catch (e) {
-      return { shiftId: null, error: e instanceof Error ? e.message : 'Failed to upload odometer photo.' };
+    let odometerPhotoPath: string | null = uploadedPhotoPath;
+    if (!odometerPhotoPath) {
+      try {
+        odometerPhotoPath = await uploadOdometerPhoto(odometerPhoto, shiftId, 'start', resolvedUserId);
+      } catch (e) {
+        return { shiftId: null, error: e instanceof Error ? e.message : 'Failed to upload odometer photo.' };
+      }
     }
 
     const { error: shiftError } = await supabase
@@ -1084,6 +1346,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         started_at: capturedAt,
         start_odometer: odometerValue,
         start_odometer_photo_path: odometerPhotoPath,
+        vehicle_id: effectiveShiftVehicleId,
       })
       .eq('id', shiftId);
 
@@ -1092,21 +1355,23 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId: null, error: shiftError.message };
     }
 
-    const { error: logError } = await supabase.from('odometer_logs').insert({
-      id: startPayload.log_id,
-      driver_id: driverRecordId,
-      vehicle_id: state.vehicleId,
-      shift_id: shiftId,
-      odometer_value: odometerValue,
-      photo_path: odometerPhotoPath,
-      lat: startLat,
-      lng: startLng,
-      accuracy_m: startAccuracy,
-      recorded_at: capturedAt,
-    });
-    if (logError) {
-      console.error('Failed to log start odometer', { shiftId, message: logError.message });
-      return { shiftId: null, error: `Odometer log insert failed: ${logError.message}` };
+    if (!skipOdometerLog) {
+      const { error: logError } = await supabase.from('odometer_logs').insert({
+        id: startPayload.log_id,
+        driver_id: driverRecordId,
+        vehicle_id: effectiveShiftVehicleId,
+        shift_id: shiftId,
+        odometer_value: odometerValue,
+        photo_path: odometerPhotoPath,
+        lat: startLat,
+        lng: startLng,
+        accuracy_m: startAccuracy,
+        recorded_at: capturedAt,
+      });
+      if (logError) {
+        console.error('Failed to log start odometer', { shiftId, message: logError.message });
+        return { shiftId: null, error: `Odometer log insert failed: ${logError.message}` };
+      }
     }
 
     await createEvent('shift_start', {});
@@ -1115,6 +1380,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [
     createEvent,
     ensureActiveShift,
+    resolveProfileId,
+    resolveDriverRecordId,
     state.checklistSubmitted,
     state.driverRecordId,
     state.startOdometerCapturedAt,
@@ -1140,9 +1407,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: 'User not available.' };
     }
 
-    const driverRecordId = state.driverRecordId;
+    const driverResolution = await resolveDriverRecordId(resolvedUserId);
+    const driverRecordId = driverResolution.driverRecordId;
     if (!driverRecordId) {
-      return { ok: false, error: 'Driver profile not available.' };
+      return { ok: false, error: driverResolution.error ?? 'Driver profile not available.' };
     }
 
     // Stop location tracking first
@@ -1227,7 +1495,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     setState(prev => ({ ...prev, activeShiftId: null }));
     return { ok: true };
-  }, [state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
+  }, [resolveDriverRecordId, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
 
   const closeActiveBreak = useCallback(
     async (options?: { queueOnError?: boolean }) => {
@@ -1248,7 +1516,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AppStateContext.Provider value={{ state, updateAppState, resetShift, submitPreStartChecklist, startShift, endShift, createEvent, closeActiveBreak }}>
+    <AppStateContext.Provider
+      value={{
+        state,
+        updateAppState,
+        resetShift,
+        refreshCurrentVehicle,
+        submitPreStartChecklist,
+        startShift,
+        endShift,
+        createEvent,
+        closeActiveBreak,
+      }}
+    >
       {children}
     </AppStateContext.Provider>
   );

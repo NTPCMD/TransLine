@@ -7,7 +7,7 @@ export type RootStackParamList = {
   VehicleAssignment: undefined;
   DriverDeclaration: undefined;
   StartShift: undefined;
-  PreStartChecklist: undefined;
+  PreStartChecklist: { vehicleId: string };
   WaitForInstruction: undefined;
   ReadingsAndPhotos: undefined;
   Main: undefined;

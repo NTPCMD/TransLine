@@ -172,7 +172,6 @@ class OfflineQueue {
           occurred_at: event.timestamp,
           lat: event.payload.lat || null,
           lng: event.payload.lng || null,
-          heading: event.payload.heading || null,
           metadata: event.payload.metadata || {},
           status: 'pending',
         });
