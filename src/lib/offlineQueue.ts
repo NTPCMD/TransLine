@@ -163,8 +163,7 @@ class OfflineQueue {
       this.notifySubscribers();
 
       try {
-        // Insert event into Supabase
-        const { error } = await supabase.from('events').insert({
+        const baseInsert = {
           shift_id: event.payload.shift_id,
           driver_id: event.payload.driver_id,
           vehicle_id: event.payload.vehicle_id,
@@ -174,7 +173,31 @@ class OfflineQueue {
           lng: event.payload.lng || null,
           metadata: event.payload.metadata || {},
           status: 'pending',
-        });
+        };
+
+        let { error } = await supabase.from('events').insert(baseInsert);
+        let retryPayload: Record<string, unknown> = baseInsert;
+        let retryCount = 0;
+        while (error && retryCount < 5) {
+          const missingMatch = /could not find the '([^']+)' column/i.exec(error.message);
+          if (!missingMatch?.[1]) {
+            break;
+          }
+          const missingColumn = missingMatch[1];
+          const { [missingColumn]: _removed, ...rest } = retryPayload;
+          retryPayload = rest;
+          ({ error } = await supabase.from('events').insert(retryPayload));
+          retryCount += 1;
+        }
+
+        if (error) {
+          const minimalPayload = {
+            event_type: event.eventType,
+            occurred_at: event.timestamp,
+            metadata: event.payload.metadata || {},
+          };
+          ({ error } = await supabase.from('events').insert(minimalPayload));
+        }
 
         if (error) {
           throw error;

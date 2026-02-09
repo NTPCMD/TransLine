@@ -399,11 +399,19 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { profileId: null as string | null, error: 'User not available.' };
     }
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('profiles')
       .select('id')
       .eq('auth_user_id', authUserId)
       .maybeSingle();
+
+    if (error?.message?.toLowerCase().includes('auth_user_id') && error.message.toLowerCase().includes('exist')) {
+      ({ data, error } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', authUserId)
+        .maybeSingle());
+    }
 
     if (error) {
       console.warn('[ProfileResolve] Failed to resolve profile', {
@@ -823,7 +831,28 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
       await processEventQueue();
 
-      const { data, error } = await supabase.from('events').insert(baseEvent).select('id').single();
+      let { data, error } = await supabase.from('events').insert(baseEvent).select('id').single();
+      let retryPayload: Record<string, unknown> = baseEvent;
+      let retryCount = 0;
+      while (error && retryCount < 5) {
+        const missingMatch = /could not find the '([^']+)' column/i.exec(error.message);
+        if (!missingMatch?.[1]) {
+          break;
+        }
+        const missingColumn = missingMatch[1];
+        const { [missingColumn]: _removed, ...rest } = retryPayload;
+        retryPayload = rest;
+        ({ data, error } = await supabase.from('events').insert(retryPayload).select('id').single());
+        retryCount += 1;
+      }
+      if (error) {
+        const minimalPayload = {
+          event_type: eventType,
+          occurred_at: occurredAt,
+          metadata,
+        };
+        ({ data, error } = await supabase.from('events').insert(minimalPayload).select('id').single());
+      }
       if (error) {
         console.error('Failed to create event', { eventType, shiftId: state.activeShiftId, message: error.message });
         if (queueOnError) {
@@ -883,12 +912,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const driverRecordId = driverResolution.driverRecordId;
     if (!driverRecordId) {
       return { shiftId: null, error: driverResolution.error ?? 'Driver profile not available.' };
-    }
-
-    const profileResolution = await resolveProfileId(resolvedUserId);
-    const profileId = profileResolution.profileId;
-    if (!profileId) {
-      return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
     }
 
     const profileResolution = await resolveProfileId(resolvedUserId);
@@ -1129,6 +1152,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const driverRecordId = driverResolution.driverRecordId;
     if (!driverRecordId) {
       return { shiftId: null, error: driverResolution.error ?? 'Driver profile not available.' };
+    }
+
+    const profileResolution = await resolveProfileId(resolvedUserId);
+    const profileId = profileResolution.profileId;
+    if (!profileId) {
+      return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
     }
 
     const { vehicle: assignmentVehicle, error: assignmentError } = await getAssignedVehicleForCurrentUser();

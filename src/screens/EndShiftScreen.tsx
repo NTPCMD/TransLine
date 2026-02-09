@@ -66,18 +66,6 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     updateAppState({ endShiftNotes: value });
   };
 
-  const isFormValid = () => {
-    return (
-      endOdometerReading.trim() !== '' &&
-      Number.isInteger(Number(endOdometerReading)) &&
-      endOdometerPhoto !== null &&
-      endPhotoMeta !== null &&
-      endPhotoMeta.location.lat !== null &&
-      endPhotoMeta.location.lng !== null &&
-      rubbishRemoved !== null
-    );
-  };
-
   const computeDistance = () => {
     const startValue = startOdometerValue ?? Number(state.odometerReading);
     const endValue = Number(endOdometerReading);
@@ -268,10 +256,10 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
         />
       </InfoCard>
       
-      <Button 
-        label={isSubmitting ? 'Ending...' : 'Confirm end'} 
-        onPress={handleConfirm} 
-        disabled={isSubmitting || !isFormValid() || Boolean(shiftLoadError)} 
+      <Button
+        label={isSubmitting ? 'Ending...' : 'Confirm end'}
+        onPress={handleConfirm}
+        disabled={isSubmitting || Boolean(shiftLoadError)}
       />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
     </ScreenContainer>
