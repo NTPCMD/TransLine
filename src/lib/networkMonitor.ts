@@ -12,28 +12,40 @@ class NetworkMonitor {
   }
 
   private initialize() {
-    // Subscribe to network state changes
-    this.unsubscribeNetInfo = NetInfo.addEventListener((state) => {
-      this.currentState = state;
-      const isOnline = state.isConnected ?? false;
-      
-      // Notify all subscribers
-      this.subscribers.forEach((callback) => {
-        try {
-          callback(isOnline);
-        } catch (error) {
-          console.error('Error in network state callback:', error);
-        }
+    try {
+      // Subscribe to network state changes
+      this.unsubscribeNetInfo = NetInfo.addEventListener((state) => {
+        this.currentState = state;
+        const isOnline = state.isConnected ?? false;
+
+        // Notify all subscribers
+        this.subscribers.forEach((callback) => {
+          try {
+            callback(isOnline);
+          } catch (error) {
+            console.error('Error in network state callback:', error);
+          }
+        });
       });
-    });
+    } catch (error) {
+      console.warn('Network monitor failed to initialize', error);
+    }
   }
 
   /**
    * Check if currently online
    */
   async isOnline(): Promise<boolean> {
-    const state = await NetInfo.fetch();
-    return state.isConnected ?? false;
+    try {
+      const state = await NetInfo.fetch();
+      return state.isConnected ?? false;
+    } catch (error) {
+      console.warn('Network status fetch failed', error);
+      if (this.currentState) {
+        return this.currentState.isConnected ?? false;
+      }
+      return true;
+    }
   }
 
   /**
@@ -63,8 +75,13 @@ class NetworkMonitor {
    * Get current network type (wifi/cellular/none)
    */
   async getNetworkType(): Promise<string> {
-    const state = await NetInfo.fetch();
-    return state.type || 'unknown';
+    try {
+      const state = await NetInfo.fetch();
+      return state.type || 'unknown';
+    } catch (error) {
+      console.warn('Network type fetch failed', error);
+      return this.currentState?.type || 'unknown';
+    }
   }
 
   /**

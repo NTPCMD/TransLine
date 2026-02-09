@@ -13,7 +13,7 @@ export default function DriverDeclarationScreen(props: ScreenProps<'DriverDeclar
 
   const handleAccept = async () => {
     updateAppState({ declarationAccepted: true });
-    navigation.replace('StartShift');
+    navigation.replace('VehicleAssignment');
   };
 
   return (

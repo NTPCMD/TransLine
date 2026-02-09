@@ -26,7 +26,7 @@ interface AssignmentContextValue {
   assignment: VehicleAssignment | null;
   vehicle: AssignedVehicle | null;
   error: string | null;
-  refresh: () => Promise<void>;
+  refresh: (force?: boolean) => Promise<void>;
 }
 
 const AssignmentContext = createContext<AssignmentContextValue | undefined>(undefined);

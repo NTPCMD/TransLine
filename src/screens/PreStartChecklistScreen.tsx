@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View, Pressable, TextInput, ScrollView } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
-import { useActiveAssignment } from '../state/AssignmentContext';
+import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
 type ChecklistItem = {
@@ -76,11 +76,26 @@ const initialSections: ChecklistSection[] = [
 
 export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChecklist'>) {
   const { navigation } = props;
-  const { submitPreStartChecklist } = useAppState();
-  const { status, refresh } = useActiveAssignment();
+  const { state } = useAppState();
+  const vehicleId = props.route.params?.vehicleId ?? null;
   const [sections, setSections] = useState<ChecklistSection[]>(initialSections);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const checksPayload = useMemo(() => {
+    return sections.reduce<Record<string, unknown>>((acc, section) => {
+      section.items.forEach(item => {
+        acc[item.id] = {
+          status: item.status,
+          note: item.note,
+          critical: item.critical,
+          label: item.label,
+          section: section.title,
+        };
+      });
+      return acc;
+    }, {});
+  }, [sections]);
 
   const toggleSection = (sectionId: string) => {
     setSections(prev => prev.map(s => (s.id === sectionId ? { ...s, expanded: !s.expanded } : s)));
@@ -108,50 +123,89 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
   const failedItemsHaveNotes = sections.every(section => section.items.every(item => item.status !== 'fail' || (item.status === 'fail' && item.note.trim() !== '')));
   const canSubmit = allItemsCompleted && failedItemsHaveNotes;
 
+  const resolveAuthUserId = async () => {
+    if (state.userId) return state.userId;
+    const { data } = await supabase.auth.getSession();
+    return data?.session?.user?.id ?? null;
+  };
+
+  const loadDraftId = async (driverId: string, vehicleIdValue: string) => {
+    const { data, error } = await supabase
+      .from('vehicle_checklists')
+      .select('id')
+      .eq('driver_id', driverId)
+      .eq('vehicle_id', vehicleIdValue)
+      .eq('status', 'draft')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    return data?.id ?? null;
+  };
+
+  const saveChecklist = async (status: 'draft' | 'submitted') => {
+    if (!vehicleId) {
+      setSubmissionError('Missing vehicle selection. Please return to assignment.');
+      return false;
+    }
+
+    const driverId = await resolveAuthUserId();
+    if (!driverId) {
+      setSubmissionError('User not available. Please sign in again.');
+      return false;
+    }
+
+    const shiftId = state.activeShiftId ?? null;
+    const submittedAt = status === 'submitted' ? new Date().toISOString() : null;
+
+    try {
+      const draftId = await loadDraftId(driverId, vehicleId);
+      if (draftId) {
+        const { error } = await supabase
+          .from('vehicle_checklists')
+          .update({
+            checks: checksPayload,
+            shift_id: shiftId,
+            status,
+            submitted_at: submittedAt,
+          })
+          .eq('id', draftId);
+        if (error) {
+          throw new Error(error.message);
+        }
+        return true;
+      }
+
+      const { error } = await supabase.from('vehicle_checklists').insert({
+        driver_id: driverId,
+        vehicle_id: vehicleId,
+        shift_id: shiftId,
+        status,
+        checks: checksPayload,
+        submitted_at: submittedAt,
+      });
+      if (error) {
+        throw new Error(error.message);
+      }
+      return true;
+    } catch (error) {
+      setSubmissionError(error instanceof Error ? error.message : 'Unable to save checklist.');
+      return false;
+    }
+  };
+
   const submitChecklist = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmissionError(null);
-    if (status === 'loading') {
-      setSubmissionError('Vehicle assignment is still loading. Please wait.');
-      setIsSubmitting(false);
-      return;
-    }
-    if (status === 'unassigned') {
-      setSubmissionError('Vehicle not assigned. Please contact admin.');
-      setIsSubmitting(false);
-      return;
-    }
-    if (status === 'error') {
-      setSubmissionError('Unable to verify vehicle assignment.');
-      setIsSubmitting(false);
-      return;
-    }
-    const checklistAnswers = sections.flatMap(section =>
-      section.items.map(item => ({
-        id: item.id,
-        label: item.label,
-        status: item.status,
-        note: item.note,
-        critical: item.critical,
-        sectionTitle: section.title,
-      }))
-    );
-
-    const result = await submitPreStartChecklist({
-      answers: checklistAnswers,
-      hasFailures: hasFailedItems,
-      hasCriticalFailures,
-    });
-    if (!result.ok) {
-      setSubmissionError(result.error ?? 'Unable to save checklist.');
-      setIsSubmitting(false);
-      return;
-    }
-    if (result.queued) {
-      Alert.alert('Saved offline', 'Checklist saved offline. It will sync when you are online.');
-    }
+    const saved = await saveChecklist('submitted');
     setIsSubmitting(false);
+    if (!saved) return;
+    Alert.alert('Checklist submitted', 'Checklist saved successfully.');
     if (hasCriticalFailures) {
       navigation.navigate('WaitForInstruction');
     } else {
@@ -159,22 +213,23 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
     }
   };
 
+  const saveDraft = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setSubmissionError(null);
+    const saved = await saveChecklist('draft');
+    setIsSubmitting(false);
+    if (saved) {
+      Alert.alert('Draft saved', 'Your checklist draft was saved.');
+    }
+  };
+
   return (
     <ScreenContainer title="Vehicle Checklist" subtitle="Complete the pre-start vehicle inspection">
-      {status === 'loading' ? (
+      {!vehicleId ? (
         <View style={styles.alertBox}>
-          <Text style={styles.alertText}>Loading vehicle assignment...</Text>
-        </View>
-      ) : null}
-
-      {status === 'unassigned' || status === 'error' ? (
-        <View style={styles.alertBox}>
-          <Text style={styles.alertText}>
-            {status === 'unassigned'
-              ? 'Vehicle not assigned. Please contact admin.'
-              : 'Unable to verify vehicle assignment.'}
-          </Text>
-          <Button label="Retry assignment" variant="ghost" onPress={refresh} />
+          <Text style={styles.alertText}>Missing vehicle selection. Return to assignment to continue.</Text>
+          <Button label="Back to assignment" variant="ghost" onPress={() => navigation.replace('VehicleAssignment')} />
         </View>
       ) : null}
 
@@ -234,11 +289,11 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
       {submissionError ? <Text style={styles.errorText}>{submissionError}</Text> : null}
 
       <View style={styles.footer}>
-        <Button label="Save Draft" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
+        <Button label="Save Draft" variant="ghost" onPress={saveDraft} disabled={isSubmitting || !vehicleId} />
         <Button
           label={isSubmitting ? 'Submitting...' : 'Submit Checklist'}
           onPress={submitChecklist}
-          disabled={!canSubmit || isSubmitting || status !== 'assigned'}
+          disabled={!canSubmit || isSubmitting || !vehicleId}
         />
       </View>
     </ScreenContainer>

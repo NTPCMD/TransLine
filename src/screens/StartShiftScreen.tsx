@@ -17,7 +17,7 @@ export default function StartShiftScreen(props: ScreenProps<'StartShift'>) {
       assignmentStatus: status,
       vehicleId: state.vehicleId,
     });
-    navigation.navigate('PreStartChecklist');
+    navigation.navigate('VehicleAssignment');
   };
 
   const assignedVehicle = state.assignedVehicle ?? vehicle;
@@ -41,7 +41,7 @@ export default function StartShiftScreen(props: ScreenProps<'StartShift'>) {
       {status !== 'loading' && !state.vehicleId ? (
         <Text style={styles.errorText}>Vehicle not assigned. Please contact admin.</Text>
       ) : null}
-      <Button label="Begin pre-start checklist" onPress={handleStart} disabled={status === 'loading' || !state.vehicleId} />
+      <Button label="Confirm vehicle" onPress={handleStart} disabled={status === 'loading' || !state.vehicleId} />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
       <Text style={styles.buildStamp}>Build: {buildStamp}</Text>
     </ScreenContainer>
