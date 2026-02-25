@@ -2,120 +2,66 @@
 
 ## Overview
 
-The TransLine mobile app includes GPS location tracking functionality to monitor driver locations during active shifts. This feature provides real-time location data for fleet management and route optimization.
+The TransLine mobile app includes GPS location tracking functionality to monitor driver locations during active shifts. Location events are stored in the `shift_events` table using the `logLocationEvent` function.
 
 ## Implementation
 
-### LocationTracker Service
+### Location Events Service
 
-The `LocationTracker` class (`src/lib/locationTracking.ts`) provides a singleton service for managing GPS tracking:
+The `logLocationEvent` function (`src/lib/locationEvents.ts`) logs location fixes to the `shift_events` table:
 
 ```typescript
-import { locationTracker } from '../lib/locationTracking';
+import { logLocationEvent, getGpsFix } from '../lib/locationEvents';
 
-// Start tracking when shift begins
-await locationTracker.startTracking(shiftId);
+// Get a single GPS fix
+const fix = await getGpsFix();
 
-// Stop tracking when shift ends
-locationTracker.stopTracking();
-
-// Get current location once
-const location = await locationTracker.getCurrentLocation();
+// Log a location event for a shift
+await logLocationEvent(shiftId, fix.latitude, fix.longitude);
 ```
-
-### Tracking Configuration
-
-**Default Settings:**
-- **Update Interval**: 30 seconds
-- **Distance Interval**: 100 meters
-- **Accuracy**: High accuracy mode
-
-Location updates are triggered when either:
-- 30 seconds have elapsed since last update, OR
-- The device has moved 100 meters or more
 
 ### Database Storage
 
-Location logs are stored in the `location_logs` table with the following data:
+Location events are stored in the `shift_events` table:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| id | UUID | Primary key |
+| id | UUID | Primary key (auto-generated) |
 | shift_id | UUID | Reference to active shift |
-| latitude | DECIMAL(10,8) | Latitude coordinate |
-| longitude | DECIMAL(11,8) | Longitude coordinate |
-| accuracy | DECIMAL | Location accuracy in meters |
-| speed | DECIMAL | Speed in meters per second |
-| heading | DECIMAL | Heading in degrees (0-359) |
-| timestamp | TIMESTAMPTZ | Time of location capture |
-| created_at | TIMESTAMPTZ | Database insert time |
+| event_type | text | `'location'` |
+| latitude | numeric | Latitude coordinate |
+| longitude | numeric | Longitude coordinate |
+| metadata | jsonb | Additional data (nullable) |
+| created_at | timestamptz | Auto-set on insert |
 
 ### Permissions
 
-The app requests foreground location permissions when tracking starts:
+The app requests foreground location permissions when needed:
 
 1. On first attempt, user is prompted to grant location access
-2. If denied, tracking will not start but shift can continue
+2. If denied, location fix is not obtained
 3. Permission status is checked before each location operation
-
-### Integration Points
-
-**Starting a Shift** (`AppStateContext.tsx`):
-```typescript
-const startShift = async () => {
-  // ... create shift in database
-  
-  // Start location tracking
-  if (activeShiftId) {
-    await locationTracker.startTracking(activeShiftId);
-  }
-};
-```
-
-**Ending a Shift** (`AppStateContext.tsx`):
-```typescript
-const endShift = async () => {
-  // Stop location tracking first
-  locationTracker.stopTracking();
-  
-  // ... update shift status
-};
-```
-
-**Active Shift Screen** (`ActiveShiftScreen.tsx`):
-- Displays tracking status indicator
-- Shows last location update time
-- Allows manual location refresh
 
 ## Privacy & Security
 
 ### Row Level Security (RLS)
 
 RLS policies ensure drivers can only:
-- View their own location logs
-- Insert logs for their own shifts
-
-Admins and service roles have full access for fleet management.
+- View their own shift events
+- Insert events for their own shifts
 
 ### Data Retention
 
-Location logs are associated with shifts via foreign key. When a shift is deleted, all associated location logs are automatically removed (CASCADE).
+Location events are associated with shifts via `shift_id`. They are retained as part of the shift audit trail.
 
 ## Performance Considerations
-
-### Indexes
-
-The following indexes optimize location log queries:
-- `idx_location_logs_shift_id` - Fast shift-based lookups
-- `idx_location_logs_timestamp` - Efficient time-range queries
 
 ### Battery Impact
 
 To minimize battery drain:
 - Use High accuracy (not Highest) for balance
-- 30-second minimum interval prevents excessive updates
+- Request location only when needed
 - Tracking only active during shifts
-- Watch subscription is properly cleaned up on stop
 
 ## Error Handling
 
@@ -123,21 +69,12 @@ To minimize battery drain:
 
 If location permission is denied:
 - User is notified with explanation
-- Shift can continue without tracking
-- No location logs are saved
-
-### GPS Signal Loss
-
-If GPS signal is lost:
-- Last known location remains available
-- Updates resume when signal returns
-- No error alerts to avoid distraction
+- Shift can continue without location logging
 
 ### Network Errors
 
 If database insert fails:
 - Error is logged to console
-- Location data is lost (no local caching for privacy)
 - Next update will attempt to save again
 
 ## Testing
@@ -148,32 +85,31 @@ If database insert fails:
    - Start a new shift
    - Verify permission prompt appears
    - Grant permission
-   - Check that location updates begin
+   - Check that location events are logged to `shift_events`
 
 2. **During Shift**:
    - Move device or use location simulation
-   - Verify updates occur every 30 seconds or 100 meters
-   - Check `location_logs` table in database
+   - Verify events appear in `shift_events` with `event_type = 'location'`
 
 3. **Stop Tracking**:
    - End the shift
-   - Verify tracking stops
-   - Confirm no more location logs are saved
+   - Confirm no more location events are saved
 
 ### Database Verification
 
 ```sql
--- Check recent location logs for a shift
-SELECT * FROM location_logs 
-WHERE shift_id = '<shift-id>'
-ORDER BY timestamp DESC
+-- Check recent location events for a shift
+SELECT * FROM shift_events 
+WHERE shift_id = '<shift-id>' AND event_type = 'location'
+ORDER BY created_at DESC
 LIMIT 10;
 
--- Count logs per shift
-SELECT shift_id, COUNT(*) as log_count
-FROM location_logs
+-- Count location events per shift
+SELECT shift_id, COUNT(*) as event_count
+FROM shift_events
+WHERE event_type = 'location'
 GROUP BY shift_id
-ORDER BY log_count DESC;
+ORDER BY event_count DESC;
 ```
 
 ## Future Enhancements

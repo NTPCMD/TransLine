@@ -9,7 +9,6 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { AppStateProvider } from './src/state/AppStateContext';
 import { DriverProvider, useDriver } from './src/state/DriverContext';
 import { AssignmentProvider } from './src/state/AssignmentContext';
-import { GPSProvider } from './src/state/GPSContext';
 import { ActiveShiftProvider } from './src/state/ActiveShiftContext';
 
 const BUILD_STAMP = 'APP BUILD: transline-driver-fullflow-2026-02-02';
@@ -105,11 +104,9 @@ function AppContent() {
 
   return (
     <ActiveShiftProvider driverId={currentDriver?.id ?? null}>
-      <GPSProvider>
-        <NavigationContainer>
-          <RootNavigator />
-        </NavigationContainer>
-      </GPSProvider>
+      <NavigationContainer>
+        <RootNavigator />
+      </NavigationContainer>
     </ActiveShiftProvider>
   );
 }

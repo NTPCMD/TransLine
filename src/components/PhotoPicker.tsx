@@ -2,7 +2,7 @@ import React, { useRef, useState } from 'react';
 import { View, Image, StyleSheet, Text, TouchableOpacity, Alert, Modal, ActivityIndicator } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
-import { getGpsFix } from '../lib/gps';
+import { getGpsFix } from '../lib/locationEvents';
 
 interface PhotoPickerProps {
   uri?: string | null;
