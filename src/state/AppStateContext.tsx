@@ -109,11 +109,23 @@ type EventQueueItem = {
   };
 };
 
-type QueuedWrite = {
+const ALLOWED_RPC_NAMES = ['start_shift', 'end_shift', 'log_idle_event'] as const;
+type AllowedRpcName = typeof ALLOWED_RPC_NAMES[number];
+
+type RpcQueuedWrite = {
   id: string;
-  type: 'rpc_call' | 'checklist';
+  type: 'rpc_call';
+  name: AllowedRpcName;
+  params: Record<string, unknown>;
+};
+
+type ChecklistQueuedWrite = {
+  id: string;
+  type: 'checklist';
   payload: Record<string, unknown>;
 };
+
+type QueuedWrite = RpcQueuedWrite | ChecklistQueuedWrite;
 
 const initialState: AppState = {
   isLoggedIn: false,
@@ -445,6 +457,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   };
 
   const processQueueItem = async (item: EventQueueItem): Promise<boolean> => {
+    // RLS on shift_events requires auth.uid() to match driver_id of the active shift.
     const { error } = await supabase.from('shift_events').insert({
       shift_id: item.event.shift_id,
       event_type: item.event.event_type,
@@ -489,8 +502,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     for (const item of queue) {
       try {
         if (item.type === 'rpc_call') {
-          const { rpcName, params } = item.payload as { rpcName: string; params: Record<string, unknown> };
-          const { error } = await supabase.rpc(rpcName, params);
+          // Whitelist-only: block any RPC name not in the allowed set
+          if (!(ALLOWED_RPC_NAMES as readonly string[]).includes(item.name)) {
+            console.error('[processWriteQueue] Blocked disallowed RPC name:', item.name);
+            continue;
+          }
+          const { error } = await supabase.rpc(item.name, item.params);
           if (error) throw error;
         }
 
@@ -699,10 +716,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       await queueWrite({
         id: `${Date.now()}-create-shift`,
         type: 'rpc_call',
-        payload: {
-          rpcName: 'start_shift',
-          params: { p_driver_id: queuedDriverId, p_device_info: null, p_start_lat: null, p_start_lng: null },
-        },
+        name: 'start_shift',
+        params: { p_driver_id: queuedDriverId, p_device_info: null, p_start_lat: null, p_start_lng: null },
       });
       setState(prev => ({ ...prev, activeShiftId: localShiftId }));
       return { shiftId: localShiftId, driverId: queuedDriverId, queued: true, shiftVehicleId: vehicleIdToUse };
@@ -869,6 +884,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         toVehicle: assignmentVehicleId,
       });
 
+      // The end_shift RPC enforces driver_id = auth.uid() server-side, so
+      // only the authenticated driver's shift can be closed.
       await rpcEndShift({ p_shift_id: activeShift.id, p_end_lat: null, p_end_lng: null });
       setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
     }
@@ -976,6 +993,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           toVehicle: assignmentVehicleId,
         });
 
+        // The end_shift RPC enforces driver_id = auth.uid() server-side, so
+        // only the authenticated driver's shift can be closed.
         await rpcEndShift({ p_shift_id: existingShift.id, p_end_lat: null, p_end_lng: null });
         setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
       }
@@ -1059,10 +1078,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       await queueWrite({
         id: `${Date.now()}-end-shift`,
         type: 'rpc_call',
-        payload: {
-          rpcName: 'end_shift',
-          params: { p_shift_id: state.activeShiftId, p_end_lat: payload.location.lat, p_end_lng: payload.location.lng },
-        },
+        name: 'end_shift',
+        params: { p_shift_id: state.activeShiftId, p_end_lat: payload.location.lat, p_end_lng: payload.location.lng },
       });
       return { ok: true, queued: true };
     }
