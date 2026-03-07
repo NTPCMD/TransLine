@@ -43,16 +43,11 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
         setShiftLoadError('End odometer already captured.');
       }
     };
-
     loadShift();
 
     const unsubscribe = navigation.addListener('beforeRemove', (event) => {
-      if (!isSubmitting) {
-        return;
-      }
-      event.preventDefault();
+      if (isSubmitting) event.preventDefault();
     });
-
     return unsubscribe;
   }, [isSubmitting, navigation, state.activeShiftId]);
 
@@ -69,7 +64,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
   const computeDistance = () => {
     const startValue = startOdometerValue ?? Number(state.odometerReading);
     const endValue = Number(endOdometerReading);
-    if (Number.isNaN(endValue) || startValue === null || Number.isNaN(startValue)) return null;
+    if (Number.isNaN(endValue) || Number.isNaN(startValue)) return null;
     return endValue - startValue;
   };
 
@@ -87,8 +82,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
 
   const handleConfirm = async () => {
     if (isSubmitting) return;
-    
-    // Validation
+
     if (!endOdometerReading.trim()) {
       Alert.alert('Missing Information', 'Please enter the final odometer reading.');
       return;
@@ -108,24 +102,15 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     }
     const endLocation = endPhotoMeta.location;
     if (endPhotoMeta.locationDenied || endLocation.lat === null || endLocation.lng === null) {
-      Alert.alert(
-        'Location required',
-        'Location is required for the final odometer photo. Please allow Location, then retake or try again.'
-      );
+      Alert.alert('Location required', 'Location is required for the final odometer photo. Please allow Location and try again.');
       return;
     }
     if (rubbishRemoved === null) {
       Alert.alert('Missing Information', 'Please confirm whether rubbish has been removed.');
       return;
     }
-    
     if (!state.activeShiftId) {
       Alert.alert('Unable to end shift', 'No active shift found.');
-      return;
-    }
-
-    if (startOdometerValue === null && !state.odometerReading) {
-      Alert.alert('Unable to end shift', 'Start odometer is missing. Please capture it before ending the shift.');
       return;
     }
 
@@ -137,34 +122,32 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
 
     const distanceKm = odometerValue - startValue;
     const confirmed = await confirmDistance(distanceKm);
-    if (!confirmed) {
-      return;
-    }
-    
+    if (!confirmed) return;
+
     setIsSubmitting(true);
     let shouldReset = true;
-    
+
     try {
       if (state.isOnBreak) {
         await closeActiveBreak();
       }
-      
+
       const shiftEndResult = await createEvent(
         'shift_end',
-        { 
+        {
           end_shift_notes: endShiftNotes,
           end_odometer_value: odometerValue,
           distance_km: distanceKm,
-          rubbish_removed: rubbishRemoved === 'yes'
+          rubbish_removed: rubbishRemoved === 'yes',
         },
         { queueOnError: true }
       );
-      
+
       if (shiftEndResult.status === 'error') {
         Alert.alert('Unable to end shift', shiftEndResult.error ?? 'Unable to end shift.');
         return;
       }
-      
+
       const ended = await endShift({
         endOdometerValue: odometerValue,
         endOdometerPhoto: endOdometerPhoto,
@@ -175,37 +158,47 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
           accuracy: endLocation.accuracy,
         },
       });
+
       if (!ended.ok) {
         Alert.alert('Unable to end shift', ended.error ?? 'Unable to end shift.');
         return;
       }
+
       if (ended.queued) {
         Alert.alert('Saved offline', 'End of shift details saved offline. They will sync when you are online.');
       }
-      
+
       resetShift();
       updateAppState({ isLoggedIn: true, declarationAccepted: true });
       shouldReset = false;
-      navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+
+      // Go back to vehicle assignment for next shift, not login
+      navigation.reset({ index: 0, routes: [{ name: 'VehicleAssignment' }] });
     } catch (error) {
       Alert.alert('Unable to end shift', error instanceof Error ? error.message : 'Unable to end shift.');
     } finally {
-      if (shouldReset) {
-        setIsSubmitting(false);
-      }
+      if (shouldReset) setIsSubmitting(false);
     }
   };
+
+  const vehicleLabel = state.vehicleRegistration
+    ?? state.assignedVehicle?.rego
+    ?? 'Unknown';
+
+  const shiftStartLabel = state.shiftStartTime
+    ? new Date(state.shiftStartTime).toLocaleTimeString()
+    : 'Not set';
 
   return (
     <ScreenContainer title="End shift" subtitle="Complete your shift and log out">
       <NetworkStatusBanner />
       <InfoCard title="Summary">
-        <Text style={styles.text}>Vehicle: {state.vehicleRegistration ?? state.assignedVehicle?.registration ?? 'Unknown'}</Text>
-        <Text style={styles.text}>Start time: {state.shiftStartTime ? state.shiftStartTime.toLocaleTimeString() : 'Not set'}</Text>
+        <Text style={styles.text}>Vehicle: {vehicleLabel}</Text>
+        <Text style={styles.text}>Start time: {shiftStartLabel}</Text>
         <Text style={styles.text}>Start Odometer: {state.odometerReading || 'Pending'}</Text>
         {shiftLoadError ? <Text style={styles.errorText}>{shiftLoadError}</Text> : null}
       </InfoCard>
-      
+
       <InfoCard title="Final Odometer Reading">
         <TextField
           label="Final odometer reading"
@@ -219,18 +212,16 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
           uri={endOdometerPhoto}
           onChange={(uri) => {
             setEndOdometerPhoto(uri);
-            if (!uri) {
-              setEndPhotoMeta(null);
-            }
+            if (!uri) setEndPhotoMeta(null);
           }}
           cameraOnly
           onCaptureMeta={(meta) => setEndPhotoMeta(meta)}
         />
-        {computeDistance() !== null && (startOdometerValue !== null || state.odometerReading) ? (
+        {computeDistance() !== null ? (
           <Text style={styles.distanceText}>Distance: {computeDistance()?.toFixed(1)} km</Text>
         ) : null}
       </InfoCard>
-      
+
       <InfoCard title="End of shift checklist">
         <Text style={styles.label}>Have you removed all rubbish from the vehicle?</Text>
         <View style={styles.choiceRow}>
@@ -255,7 +246,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
           multiline
         />
       </InfoCard>
-      
+
       <Button
         label={isSubmitting ? 'Ending...' : 'Confirm end'}
         onPress={handleConfirm}
@@ -267,44 +258,14 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
 }
 
 const styles = StyleSheet.create({
-  text: {
-    color: '#111827',
-    fontSize: 16,
-  },
-  errorText: {
-    color: '#D32F2F',
-    marginTop: 8,
-  },
-  distanceText: {
-    color: '#111827',
-    marginTop: 8,
-    fontWeight: '600',
-  },
-  label: {
-    color: '#2E2E2E',
-    marginBottom: 8,
-  },
-  choiceRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
-  },
-  choiceButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 999,
-  },
-  choiceActive: {
-    backgroundColor: '#C62828',
-  },
-  choiceInactive: {
-    backgroundColor: '#F2F2F2',
-  },
-  choiceTextActive: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  choiceTextInactive: {
-    color: '#9E9E9E',
-  },
+  text: { color: '#111827', fontSize: 16 },
+  errorText: { color: '#D32F2F', marginTop: 8 },
+  distanceText: { color: '#111827', marginTop: 8, fontWeight: '600' },
+  label: { color: '#2E2E2E', marginBottom: 8 },
+  choiceRow: { flexDirection: 'row', gap: 8, marginBottom: 12 },
+  choiceButton: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 999 },
+  choiceActive: { backgroundColor: '#C62828' },
+  choiceInactive: { backgroundColor: '#F2F2F2' },
+  choiceTextActive: { color: '#FFFFFF', fontWeight: '600' },
+  choiceTextInactive: { color: '#9E9E9E' },
 });
