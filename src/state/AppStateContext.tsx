@@ -12,9 +12,10 @@ import { startShift as rpcStartShift, endShift as rpcEndShift } from '../lib/shi
 import { uploadShiftPhoto } from '../lib/photoUpload';
 
 export interface VehicleInfo {
-  registration: string | null;
-  type: string | null;
-  depot: string | null;
+  id: string | null;
+  rego: string | null;
+  make: string | null;
+  model: string | null;
 }
 
 export interface ChecklistAnswer {
@@ -51,7 +52,6 @@ export interface AppState {
   endShiftRubbishRemoved: 'yes' | 'no' | null;
   endShiftNotes: string;
   userId: string | null;
-  // drivers.id (driver record primary key) resolved from auth user
   driverRecordId: string | null;
   activeShiftId: string | null;
   queuedEventsCount: number;
@@ -185,29 +185,27 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         vehicleId: vehicle?.id ?? null,
         assignedVehicle: vehicle
           ? {
-              registration: vehicle.registration ?? null,
-              type: vehicle.type ?? null,
-              depot: vehicle.depot ?? vehicle.depot_name ?? null,
+              id: vehicle.id ?? null,
+              rego: vehicle.rego ?? null,
+              make: vehicle.make ?? null,
+              model: vehicle.model ?? null,
             }
           : null,
-        vehicleRegistration: vehicle?.registration ?? null,
+        vehicleRegistration: vehicle?.rego ?? null,
       }));
     } catch (err) {
       console.warn('[Assignment] Refresh vehicle details error:', err);
     }
   }, []);
+
   const { authUserId, currentDriver } = useDriver();
   const { status: assignmentStatus, vehicle: assignedVehicle } = useActiveAssignment();
 
-  // Subscribe to offline queue changes
   useEffect(() => {
     const unsubscribe = offlineQueue.subscribe((queue) => {
       setState(prev => ({ ...prev, queuedEventsCount: queue.length }));
     });
-
-    return () => {
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, []);
 
   useEffect(() => {
@@ -232,7 +230,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         console.warn('Failed to restore shift state', error);
       }
     };
-
     restoreShiftState();
   }, []);
 
@@ -252,10 +249,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         console.warn('Failed to persist shift state', error);
       }
     };
-
     persistShiftState();
   }, [state.activeShiftId, state.shiftStartTime, state.odometerReading, state.shiftStarted]);
 
+  // Sync assignment context into app state
   useEffect(() => {
     setState(prev => ({
       ...prev,
@@ -263,59 +260,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       isLoggedIn: Boolean(authUserId),
       driverRecordId: currentDriver?.id ?? prev.driverRecordId,
       vehicleId:
-        assignmentStatus === 'loading'
-          ? prev.vehicleId
-          : assignedVehicle?.id ?? null,
+        assignmentStatus === 'loading' ? prev.vehicleId : assignedVehicle?.id ?? null,
       assignedVehicle:
         assignmentStatus === 'loading'
           ? prev.assignedVehicle
           : assignedVehicle
             ? {
-                registration: assignedVehicle.registration ?? null,
-                type: assignedVehicle.type ?? null,
-                depot: assignedVehicle.depot ?? null,
+                id: assignedVehicle.id ?? null,
+                rego: assignedVehicle.rego ?? null,
+                make: assignedVehicle.make ?? null,
+                model: assignedVehicle.model ?? null,
               }
             : null,
       vehicleRegistration:
-        assignmentStatus === 'loading'
-          ? prev.vehicleRegistration
-          : assignedVehicle?.registration ?? null,
+        assignmentStatus === 'loading' ? prev.vehicleRegistration : assignedVehicle?.rego ?? null,
     }));
   }, [authUserId, currentDriver, assignmentStatus, assignedVehicle]);
-
-  useEffect(() => {
-    console.log('shift state updated', {
-      activeShiftId: state.activeShiftId,
-      shiftStarted: state.shiftStarted,
-      shiftStartTime: state.shiftStartTime,
-    });
-  }, [state.activeShiftId, state.shiftStarted, state.shiftStartTime]);
-
-  useEffect(() => {
-    const lookupVehicleFromRegistration = async (registration: string) => {
-      const { data, error } = await supabase
-        .from('vehicles')
-        .select('id, registration')
-        .eq('registration', registration)
-        .single();
-      if (error || !data) {
-        console.warn('Unable to backfill vehicle id from registration', { registration, message: error?.message });
-        return;
-      }
-      setState(prev => ({
-        ...prev,
-        vehicleId: data.id,
-        vehicleRegistration: data.registration,
-      }));
-    };
-
-    const storedVehicleId = state.vehicleId;
-    if (!storedVehicleId) return;
-    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(storedVehicleId);
-    if (!isUuid && storedVehicleId.includes('-')) {
-      void lookupVehicleFromRegistration(storedVehicleId);
-    }
-  }, [state.vehicleId]);
 
   const loadQueuedEvents = async (): Promise<EventQueueItem[]> => {
     const stored = await AsyncStorage.getItem(EVENT_QUEUE_KEY);
@@ -344,15 +304,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const { data, error } = await supabase.auth.getUser();
       if (error) return null;
       const uid = data?.user?.id ?? null;
-      if (uid) {
-        setState(prev => ({ ...prev, userId: uid, isLoggedIn: true }));
-      }
+      if (uid) setState(prev => ({ ...prev, userId: uid, isLoggedIn: true }));
       return uid;
     } catch {
       return null;
     }
   };
 
+  // drivers.user_id = auth.users.id (your schema)
   const resolveDriverRecordId = async (authUserId: string | null) => {
     if (!authUserId) {
       return { driverRecordId: null as string | null, error: 'User not available.' };
@@ -361,7 +320,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const { data, error } = await supabase
       .from('drivers')
       .select('id')
-      .eq('auth_user_id', authUserId)
+      .eq('user_id', authUserId)
       .maybeSingle();
 
     if (error) {
@@ -377,11 +336,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { driverRecordId: null as string | null, error: 'Driver profile not available.' };
     }
 
-    console.log('[DriverResolve] Resolved driver record', {
-      authUserId,
-      driverRecordId: data.id,
-    });
-
     if (state.driverRecordId !== data.id) {
       setState(prev => ({ ...prev, driverRecordId: data.id }));
     }
@@ -389,24 +343,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     return { driverRecordId: data.id, error: null as string | null };
   };
 
+  // profiles.id = auth.users.id (your schema)
   const resolveProfileId = async (authUserId: string | null) => {
     if (!authUserId) {
       return { profileId: null as string | null, error: 'User not available.' };
     }
 
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from('profiles')
       .select('id')
-      .eq('auth_user_id', authUserId)
+      .eq('id', authUserId)
       .maybeSingle();
-
-    if (error?.message?.toLowerCase().includes('auth_user_id') && error.message.toLowerCase().includes('exist')) {
-      ({ data, error } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('id', authUserId)
-        .maybeSingle());
-    }
 
     if (error) {
       console.warn('[ProfileResolve] Failed to resolve profile', {
@@ -448,16 +395,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const existing = await Location.getForegroundPermissionsAsync();
     if (existing.status !== 'granted') {
       const requested = await Location.requestForegroundPermissionsAsync();
-      if (requested.status !== 'granted') {
-        return null;
-      }
+      if (requested.status !== 'granted') return null;
     }
-
     return Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
   };
 
   const processQueueItem = async (item: EventQueueItem): Promise<boolean> => {
-    // RLS on shift_events requires auth.uid() to match driver_id of the active shift.
     const { error } = await supabase.from('shift_events').insert({
       shift_id: item.event.shift_id,
       event_type: item.event.event_type,
@@ -479,22 +422,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const processEventQueue = useCallback(async () => {
     const queue = await loadQueuedEvents();
     if (queue.length === 0) return;
-
     const remaining: EventQueueItem[] = [];
     for (const item of queue) {
       const success = await processQueueItem(item);
-      if (!success) {
-        remaining.push(item);
-      }
+      if (!success) remaining.push(item);
     }
-
     await saveQueuedEvents(remaining);
   }, []);
 
   const processWriteQueue = useCallback(async () => {
     const queue = await loadWriteQueue();
     if (queue.length === 0) return;
-
     const isOnline = await networkMonitor.isOnline();
     if (!isOnline) return;
 
@@ -502,7 +440,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     for (const item of queue) {
       try {
         if (item.type === 'rpc_call') {
-          // Whitelist-only: block any RPC name not in the allowed set
           if (!(ALLOWED_RPC_NAMES as readonly string[]).includes(item.name)) {
             console.error('[processWriteQueue] Blocked disallowed RPC name:', item.name);
             continue;
@@ -543,7 +480,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         remaining.push(item);
       }
     }
-
     await saveWriteQueue(remaining);
   }, []);
 
@@ -561,10 +497,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         processWriteQueue();
       }
     });
-
-    return () => {
-      unsubscribe();
-    };
+    return () => unsubscribe();
   }, [processEventQueue, processWriteQueue]);
 
   const createEvent = useCallback(
@@ -584,10 +517,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         metadata,
       };
 
-      // Check network connectivity
       const isOnline = await networkMonitor.isOnline();
 
-      // If offline, queue immediately
       if (!isOnline) {
         if (queueOnError) {
           await offlineQueue.addEvent(eventType, {
@@ -625,9 +556,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
   const ensureActiveShift = useCallback(async (vehicleIdOverride?: string | null) => {
     const resolvedUserId = await resolveAuthUserId();
-    if (!resolvedUserId) {
-      return { shiftId: null, error: 'User not available.' };
-    }
+    if (!resolvedUserId) return { shiftId: null, error: 'User not available.' };
 
     const driverResolution = await resolveDriverRecordId(resolvedUserId);
     const driverRecordId = driverResolution.driverRecordId;
@@ -640,8 +569,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     if (!profileId) {
       return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
     }
-
-    const driverIdCandidates = [profileId];
 
     const vehicleIdToUse = vehicleIdOverride ?? state.vehicleId;
     if (!vehicleIdToUse) {
@@ -657,78 +584,48 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           .select('id, vehicle_id, driver_id')
           .eq('id', state.activeShiftId)
           .maybeSingle();
-
         if (!error && data) {
-          return {
-            shiftId: data.id,
-            driverId: data.driver_id ?? profileId,
-            shiftVehicleId: data.vehicle_id ?? vehicleIdToUse,
-          };
+          return { shiftId: data.id, driverId: data.driver_id ?? profileId, shiftVehicleId: data.vehicle_id ?? vehicleIdToUse };
         }
       }
-
       return { shiftId: state.activeShiftId, driverId: profileId, shiftVehicleId: vehicleIdToUse };
     }
 
-    let activeShift: { id: string; vehicle_id: string | null; driver_id: string | null } | null = null;
-    let activeShiftError: string | null = null;
-    let activeShiftDriverId = profileId;
-
-    for (const candidateDriverId of driverIdCandidates) {
-      const { data, error } = await supabase
-        .from('shifts')
-        .select('id, vehicle_id, driver_id')
-        .eq('driver_id', candidateDriverId)
-        .is('ended_at', null)
-        .order('started_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (!error && data) {
-        activeShift = data;
-        activeShiftDriverId = candidateDriverId;
-        break;
-      }
-
-      if (error) {
-        activeShiftError = error.message;
-        if (!error.message.toLowerCase().includes('row-level security')) {
-          break;
-        }
-      }
-    }
+    // Look for existing active shift
+    const { data: activeShift, error: activeShiftError } = await supabase
+      .from('shifts')
+      .select('id, vehicle_id, driver_id')
+      .eq('driver_id', profileId)
+      .is('ended_at', null)
+      .order('started_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
     if (activeShiftError && !activeShift) {
-      return { shiftId: null, error: activeShiftError };
+      return { shiftId: null, error: activeShiftError.message };
     }
 
     if (activeShift) {
       setState(prev => ({ ...prev, activeShiftId: activeShift.id }));
       return {
         shiftId: activeShift.id,
-        driverId: activeShift.driver_id ?? activeShiftDriverId,
+        driverId: activeShift.driver_id ?? profileId,
         shiftVehicleId: activeShift.vehicle_id ?? vehicleIdToUse,
       };
     }
+
     if (!isOnline) {
       const localShiftId = generateUuid();
-      const queuedDriverId = profileId;
       await queueWrite({
         id: `${Date.now()}-create-shift`,
         type: 'rpc_call',
         name: 'start_shift',
-        params: { p_driver_id: queuedDriverId, p_device_info: null, p_start_lat: null, p_start_lng: null },
+        params: { p_driver_id: profileId, p_device_info: null, p_start_lat: null, p_start_lng: null },
       });
       setState(prev => ({ ...prev, activeShiftId: localShiftId }));
-      return { shiftId: localShiftId, driverId: queuedDriverId, queued: true, shiftVehicleId: vehicleIdToUse };
+      return { shiftId: localShiftId, driverId: profileId, queued: true, shiftVehicleId: vehicleIdToUse };
     }
 
-    console.log('[ShiftStart]', {
-      driverRecordId,
-      profileId,
-      authUid: resolvedUserId,
-      vehicleId: vehicleIdToUse,
-    });
     const { shiftId: newShiftId, error: rpcError } = await rpcStartShift({
       p_driver_id: profileId,
       p_device_info: null,
@@ -742,7 +639,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     setState(prev => ({ ...prev, activeShiftId: newShiftId }));
     return { shiftId: newShiftId, driverId: profileId, shiftVehicleId: vehicleIdToUse };
-  }, [resolveDriverRecordId, resolveProfileId, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
+  }, [state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
 
   const submitPreStartChecklist = useCallback(
     async (payload: {
@@ -752,9 +649,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       assignmentVehicleId?: string | null;
     }) => {
       const resolvedUserId = await resolveAuthUserId();
-      if (!resolvedUserId) {
-        return { ok: false, shiftId: null, error: 'User not available.' };
-      }
+      if (!resolvedUserId) return { ok: false, shiftId: null, error: 'User not available.' };
 
       const driverResolution = await resolveDriverRecordId(resolvedUserId);
       const driverRecordId = driverResolution.driverRecordId;
@@ -765,17 +660,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const { shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(
         payload.assignmentVehicleId ?? null
       );
-      if (!shiftId || error) {
-        return { ok: false, shiftId: null, error };
-      }
-
-      if (!driverId) {
-        return { ok: false, shiftId: null, error: 'User not available.' };
-      }
-
-      if (!shiftVehicleId) {
-        return { ok: false, shiftId: null, error: 'Active shift vehicle not available. Refresh assignment.' };
-      }
+      if (!shiftId || error) return { ok: false, shiftId: null, error };
+      if (!driverId) return { ok: false, shiftId: null, error: 'User not available.' };
+      if (!shiftVehicleId) return { ok: false, shiftId: null, error: 'Active shift vehicle not available. Refresh assignment.' };
 
       const submissionId = generateUuid();
       const submittedAt = new Date().toISOString();
@@ -824,14 +711,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     capturedAt?: string;
     location?: { lat: number; lng: number; accuracy: number | null };
   }) => {
-    if (!state.checklistSubmitted && state.preStartChecklistAnswers.length === 0) {
-      console.warn('Starting shift without checklist state set.');
-    }
-
     const resolvedUserId = await resolveAuthUserId();
-    if (!resolvedUserId) {
-      return { shiftId: null, error: 'User not available.' };
-    }
+    if (!resolvedUserId) return { shiftId: null, error: 'User not available.' };
 
     const driverResolution = await resolveDriverRecordId(resolvedUserId);
     const driverRecordId = driverResolution.driverRecordId;
@@ -848,46 +729,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const { vehicle: assignmentVehicle, error: assignmentError } = await getAssignedVehicleForCurrentUser();
     const assignmentVehicleId = assignmentVehicle?.id ?? null;
     if (!assignmentVehicleId) {
-      return {
-        shiftId: null,
-        error: assignmentError ?? 'No active vehicle assignment. Refresh assignment to continue.',
-      };
-    }
-
-    const { data: activeShift, error: activeShiftError } = await supabase
-      .from('shifts')
-      .select('id, vehicle_id, status, ended_at')
-      .eq('driver_id', profileId)
-      .or('ended_at.is.null,status.in.(pending,active)')
-      .order('started_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-    if (activeShiftError) {
-      console.warn('[ShiftGuard] Failed to fetch active shift', { message: activeShiftError.message });
-    }
-
-    console.log('[ShiftGuard]', {
-      driverRecordId,
-      profileId,
-      assignmentVehicleId,
-      dbActiveShiftId: activeShift?.id ?? null,
-      dbVehicleId: activeShift?.vehicle_id ?? null,
-      localActiveShiftId: state.activeShiftId,
-    });
-
-    if (!activeShift) {
-      setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
-    } else if (activeShift.vehicle_id && activeShift.vehicle_id !== assignmentVehicleId) {
-      console.warn('[ShiftMismatch] Auto-closing mismatched shift', {
-        shiftId: activeShift.id,
-        fromVehicle: activeShift.vehicle_id,
-        toVehicle: assignmentVehicleId,
-      });
-
-      // The end_shift RPC enforces driver_id = auth.uid() server-side, so
-      // only the authenticated driver's shift can be closed.
-      await rpcEndShift({ p_shift_id: activeShift.id, p_end_lat: null, p_end_lng: null });
-      setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
+      return { shiftId: null, error: assignmentError ?? 'No active vehicle assignment. Refresh assignment to continue.' };
     }
 
     const odometerReading = payload?.odometerReading ?? state.odometerReading;
@@ -907,23 +749,13 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (!odometerPhoto) {
-      return { shiftId: null, error: 'Odometer photo with GPS data is required.' };
+      return { shiftId: null, error: 'Odometer photo is required.' };
     }
 
-    let capturedAt = payload?.capturedAt ?? state.startOdometerCapturedAt;
+    let capturedAt = payload?.capturedAt ?? state.startOdometerCapturedAt ?? new Date().toISOString();
     let startLat = payload?.location?.lat ?? state.startOdometerLat;
     let startLng = payload?.location?.lng ?? state.startOdometerLng;
     let startAccuracy = payload?.location?.accuracy ?? state.startOdometerAccuracy;
-
-    if (!capturedAt) {
-      const newCapturedAt = new Date().toISOString();
-      capturedAt = newCapturedAt;
-      setState(prev => ({
-        ...prev,
-        startOdometerCapturedAt: newCapturedAt,
-        shiftStartTime: prev.shiftStartTime ?? new Date(newCapturedAt),
-      }));
-    }
 
     if (startLat === null || startLng === null) {
       try {
@@ -938,72 +770,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           startOdometerAccuracy: startAccuracy,
         }));
       } catch (e) {
-        return { shiftId: null, error: 'Odometer photo with GPS data is required.' };
+        return { shiftId: null, error: 'Location is required to start shift.' };
       }
     }
 
-    if (payload?.capturedAt || payload?.location) {
-      setState(prev => ({
-        ...prev,
-        startOdometerCapturedAt: capturedAt,
-        startOdometerLat: startLat,
-        startOdometerLng: startLng,
-        startOdometerAccuracy: startAccuracy,
-      }));
-    }
+    setState(prev => ({
+      ...prev,
+      startOdometerCapturedAt: capturedAt,
+      shiftStartTime: prev.shiftStartTime ?? new Date(capturedAt),
+    }));
 
-    let { shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(assignmentVehicleId);
-    if (!shiftId || error) {
-      return { shiftId: null, error };
-    }
-
-    if (!driverId) {
-      return { shiftId: null, error: 'User not available.' };
-    }
-
-    if (!shiftVehicleId && !assignmentVehicleId) {
-      return { shiftId: null, error: 'Active shift vehicle not available. Refresh assignment.' };
-    }
-
-    if (shiftVehicleId && assignmentVehicleId && shiftVehicleId !== assignmentVehicleId) {
-      let existingShift: { id: string; vehicle_id: string | null } | null = null;
-      if (shiftId) {
-        const { data: shiftData, error: shiftFetchError } = await supabase
-          .from('shifts')
-          .select('id, vehicle_id')
-          .eq('id', shiftId)
-          .maybeSingle();
-        if (shiftFetchError) {
-          console.warn('[ShiftMismatch] Failed to fetch active shift', { message: shiftFetchError.message });
-        } else {
-          existingShift = shiftData ?? null;
-        }
-      }
-
-      console.log('[ShiftMismatch]', {
-        activeShiftId: existingShift?.id ?? shiftId ?? state.activeShiftId,
-        activeShiftVehicleId: existingShift?.vehicle_id ?? shiftVehicleId,
-        assignmentVehicleId,
-      });
-
-      if (existingShift?.id && existingShift.vehicle_id && existingShift.vehicle_id !== assignmentVehicleId) {
-        console.warn('[ShiftMismatch] Auto-closing mismatched shift', {
-          shiftId: existingShift.id,
-          fromVehicle: existingShift.vehicle_id,
-          toVehicle: assignmentVehicleId,
-        });
-
-        // The end_shift RPC enforces driver_id = auth.uid() server-side, so
-        // only the authenticated driver's shift can be closed.
-        await rpcEndShift({ p_shift_id: existingShift.id, p_end_lat: null, p_end_lng: null });
-        setState(prev => ({ ...prev, activeShiftId: null, shiftStarted: false }));
-      }
-
-      ({ shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(assignmentVehicleId));
-      if (!shiftId || error) {
-        return { shiftId: null, error: error ?? 'Unable to create shift.' };
-      }
-    }
+    const { shiftId, error, queued } = await ensureActiveShift(assignmentVehicleId);
+    if (!shiftId || error) return { shiftId: null, error };
 
     const isOnline = await networkMonitor.isOnline();
 
@@ -1017,13 +795,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId, queued: true };
     }
 
-    // Upload pre-shift photo to shift-photos bucket
+    // Upload pre-shift photo
     const { path: photoPath, error: photoError } = await uploadShiftPhoto(shiftId, 'pre', odometerPhoto);
     if (photoError) {
       return { shiftId: null, error: `Failed to upload odometer photo: ${photoError}` };
     }
 
-    // Log the shift start event with odometer metadata
     await supabase.from('shift_events').insert({
       shift_id: shiftId,
       event_type: 'shift_start',
@@ -1041,8 +818,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     ensureActiveShift,
     resolveProfileId,
     resolveDriverRecordId,
-    state.checklistSubmitted,
-    state.driverRecordId,
+    state.odometerReading,
+    state.odometerPhoto,
     state.startOdometerCapturedAt,
     state.startOdometerLat,
     state.startOdometerLng,
@@ -1057,20 +834,10 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     capturedAt: string;
     location: { lat: number; lng: number; accuracy: number | null };
   }) => {
-    if (!state.activeShiftId) {
-      return { ok: false, error: 'No active shift found.' };
-    }
+    if (!state.activeShiftId) return { ok: false, error: 'No active shift found.' };
 
     const resolvedUserId = await resolveAuthUserId();
-    if (!resolvedUserId) {
-      return { ok: false, error: 'User not available.' };
-    }
-
-    const driverResolution = await resolveDriverRecordId(resolvedUserId);
-    const driverRecordId = driverResolution.driverRecordId;
-    if (!driverRecordId) {
-      return { ok: false, error: driverResolution.error ?? 'Driver profile not available.' };
-    }
+    if (!resolvedUserId) return { ok: false, error: 'User not available.' };
 
     const isOnline = await networkMonitor.isOnline();
 
@@ -1084,7 +851,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { ok: true, queued: true };
     }
 
-    // Upload post-shift photo to shift-photos bucket
     const { path: photoPath, error: photoError } = await uploadShiftPhoto(
       state.activeShiftId,
       'post',
@@ -1094,7 +860,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: `Failed to upload odometer photo: ${photoError}` };
     }
 
-    // Log end odometer event to shift_events
     await supabase.from('shift_events').insert({
       shift_id: state.activeShiftId,
       event_type: 'shift_end',
@@ -1107,7 +872,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       },
     });
 
-    // End the shift via RPC
     const { ok: rpcOk, error: rpcError } = await rpcEndShift({
       p_shift_id: state.activeShiftId,
       p_end_lat: payload.location.lat,
@@ -1121,13 +885,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     setState(prev => ({ ...prev, activeShiftId: null }));
     return { ok: true };
-  }, [resolveDriverRecordId, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
+  }, [state.activeShiftId, state.userId]);
 
   const closeActiveBreak = useCallback(
     async (options?: { queueOnError?: boolean }) => {
-      if (!state.isOnBreak) {
-        return { closed: false, durationSeconds: 0 };
-      }
+      if (!state.isOnBreak) return { closed: false, durationSeconds: 0 };
 
       const accumulated = state.breakAccumulatedSeconds ?? 0;
       const started = state.breakStartedAt ? new Date(state.breakStartedAt).getTime() : null;
