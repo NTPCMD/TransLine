@@ -14,42 +14,21 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
   const { state, startShift, updateAppState } = useAppState();
   const [reading, setReading] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
-  const [odometerPhotoPath, setOdometerPhotoPath] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [startWarning, setStartWarning] = useState<string | null>(null);
 
   const { status, vehicle, refresh } = useActiveAssignment();
-  const showRefreshAssignment =
-    (status !== 'loading' && !vehicle) || Boolean(startError?.toLowerCase().includes('refresh assignment'));
-  const vehicleId = vehicle?.id ?? null;
-  const hasPhoto = Boolean(odometerPhotoPath);
+
+  const showRefreshAssignment = status !== 'loading' && !vehicle;
+  const hasPhoto = Boolean(photoUri);
   const hasReading = Boolean(reading.trim());
   const canContinue = hasReading && hasPhoto && !isSaving;
 
-  React.useEffect(() => {
-    console.log('assignment status', status, vehicle);
-    console.log('odometer screen vehicle_id', vehicle?.id);
-  }, [status, vehicle]);
-
-  React.useEffect(() => {
-    console.log('[Odometer] gate', {
-      odometerReading: reading,
-      odometerPhotoPath,
-      startOdometerLat: state.startOdometerLat,
-      startOdometerLng: state.startOdometerLng,
-      isSaving,
-      vehicleId,
-    });
-  }, [
-    reading,
-    odometerPhotoPath,
-    state.startOdometerLat,
-    state.startOdometerLng,
-    isSaving,
-    vehicleId,
-  ]);
+  const vehicleLabel = vehicle?.rego
+    ? `${vehicle.rego}${vehicle.make || vehicle.model ? ` — ${[vehicle.make, vehicle.model].filter(Boolean).join(' ')}` : ''}`
+    : null;
 
   const ensureStartOdometerGps = async () => {
     if (state.startOdometerLat !== null && state.startOdometerLng !== null) {
@@ -63,7 +42,7 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
 
     try {
       const fix = await getGpsFix();
-      const capturedAt = state.startOdometerCapturedAt ?? new Date().toISOString();
+      const capturedAt = new Date().toISOString();
       updateAppState({
         startOdometerCapturedAt: capturedAt,
         startOdometerLat: fix.latitude,
@@ -71,16 +50,9 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
         startOdometerAccuracy: fix.accuracy,
         shiftStartTime: state.shiftStartTime ?? new Date(capturedAt),
       });
-      return {
-        capturedAt,
-        lat: fix.latitude,
-        lng: fix.longitude,
-        accuracy: fix.accuracy,
-      };
+      return { capturedAt, lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };
     } catch (e) {
-      setStartError(
-        'Location is required for the odometer photo. Please allow Location for this site/app, then try again.'
-      );
+      setStartError('Location is required. Please allow Location access and try again.');
       return null;
     }
   };
@@ -89,22 +61,13 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
     setAttemptedSubmit(true);
     setStartError(null);
     setStartWarning(null);
-    console.log('start shift submit pressed', { status, vehicleId: vehicle?.id });
-    if (isSaving) {
-      return;
-    }
-    if (!reading.trim() || !odometerPhotoPath) {
-      // Inline errors will show; prevent navigation
-      return;
-    }
+
+    if (isSaving) return;
+    if (!reading.trim() || !photoUri) return;
 
     if (!vehicle) {
       setStartError('No active vehicle assignment. Refresh assignment to continue.');
       return;
-    }
-
-    if (!state.checklistSubmitted && state.preStartChecklistAnswers.length === 0) {
-      console.warn('Proceeding without checklist state set.');
     }
 
     const odometerValue = Number(reading);
@@ -114,38 +77,31 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
     }
 
     const gps = await ensureStartOdometerGps();
-    if (!gps) {
-      return;
-    }
+    if (!gps) return;
 
-    updateAppState({
-      odometerReading: reading,
-      odometerPhoto: photoUri ?? '',
-    });
+    updateAppState({ odometerReading: reading, odometerPhoto: photoUri });
 
     setIsSaving(true);
     try {
-      const capturedAt = gps.capturedAt ?? new Date().toISOString();
       const { shiftId, error, queued } = await startShift({
         odometerReading: reading,
-        odometerPhoto: photoUri ?? '',
-        capturedAt,
+        odometerPhoto: photoUri,
+        capturedAt: gps.capturedAt,
         location: { lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy },
       });
-      console.log('start shift response', { shiftId, error, queued });
+
       if (!shiftId) {
         throw new Error(error ?? 'Unable to start shift.');
       }
+
       if (queued) {
         setStartWarning('Odometer captured offline. It will sync when you are online.');
       }
+
       updateAppState({ shiftStarted: true });
-      // After readings, navigate to main drawer home (dashboard)
       navigation.replace('Main');
-      console.log('navigation to Main after start shift');
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unable to save odometer reading.';
-      console.error('Failed to save odometer reading', { message, vehicleId });
       Alert.alert('Save failed', message, [{ text: 'OK' }]);
       setStartError(message);
     } finally {
@@ -160,7 +116,7 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
         value={reading}
         onChangeText={setReading}
         keyboardType="numeric"
-        placeholder="Enter the odometer"
+        placeholder="Enter the odometer reading"
       />
 
       <PhotoPicker
@@ -168,7 +124,6 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
         uri={photoUri}
         onChange={(uri) => {
           setPhotoUri(uri);
-          setOdometerPhotoPath(uri);
           updateAppState({ odometerPhoto: uri ?? '' });
           if (!uri) {
             updateAppState({
@@ -183,9 +138,7 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
         cameraOnly
         onCaptureMeta={(meta) => {
           if (meta.locationDenied) {
-            setStartError(
-              'Location denied. Tap the address bar lock icon (or app settings) and allow Location, then try again.'
-            );
+            setStartError('Location denied. Please allow Location in settings and try again.');
           } else {
             setStartError(null);
           }
@@ -201,10 +154,8 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
 
       {status === 'loading' ? (
         <Text style={{ marginTop: 8, color: '#6B7280' }}>Loading vehicle assignment...</Text>
-      ) : vehicle ? (
-        <Text style={{ marginTop: 8 }}>
-          Vehicle: {vehicle.label ?? vehicle.registration ?? vehicle.rego ?? vehicle.plate_number ?? 'Unknown registration'}
-        </Text>
+      ) : vehicleLabel ? (
+        <Text style={{ marginTop: 8, color: '#111827' }}>Vehicle: {vehicleLabel}</Text>
       ) : (
         <Text style={{ color: '#D32F2F', marginTop: 8 }}>No active vehicle assignment. Refresh assignment.</Text>
       )}
@@ -216,18 +167,20 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
       {attemptedSubmit && !reading.trim() ? (
         <Text style={{ color: '#D32F2F' }}>Odometer value is required.</Text>
       ) : null}
-      {attemptedSubmit && !odometerPhotoPath ? (
+      {attemptedSubmit && !photoUri ? (
         <Text style={{ color: '#D32F2F' }}>Odometer photo is required.</Text>
       ) : null}
-      {isSaving ? <Text style={{ color: '#6B7280' }}>Starting shift...</Text> : null}
-      {startError ? <Text style={{ color: '#D32F2F' }}>{startError}</Text> : null}
-      {startWarning ? <Text style={{ color: '#F59E0B' }}>{startWarning}</Text> : null}
+      {isSaving ? (
+        <Text style={{ color: '#6B7280' }}>Starting shift...</Text>
+      ) : null}
+      {startError ? (
+        <Text style={{ color: '#D32F2F' }}>{startError}</Text>
+      ) : null}
+      {startWarning ? (
+        <Text style={{ color: '#F59E0B' }}>{startWarning}</Text>
+      ) : null}
 
-      <Button
-        label="Continue"
-        onPress={handleContinue}
-        disabled={!canContinue}
-      />
+      <Button label="Continue" onPress={handleContinue} disabled={!canContinue} />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
     </ScreenContainer>
   );
