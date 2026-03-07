@@ -10,40 +10,49 @@ export default function StartShiftScreen(props: ScreenProps<'StartShift'>) {
   const { navigation } = props;
   const { state } = useAppState();
   const { status, vehicle } = useActiveAssignment();
-  const buildStamp = 'build-2026-02-01-assignments';
-
-  const handleStart = () => {
-    console.log('start shift pressed', {
-      assignmentStatus: status,
-      vehicleId: state.vehicleId,
-    });
-    navigation.navigate('VehicleAssignment');
-  };
 
   const assignedVehicle = state.assignedVehicle ?? vehicle;
-  const vehicleRegistration =
-    state.vehicleRegistration ??
-    assignedVehicle?.registration ??
-    vehicle?.registration ??
-    vehicle?.rego ??
-    vehicle?.plate_number;
 
+  const vehicleRego =
+    state.vehicleRegistration ??
+    assignedVehicle?.rego ??
+    vehicle?.rego;
+
+  const vehicleMake = assignedVehicle?.make ?? vehicle?.make;
+  const vehicleModel = assignedVehicle?.model ?? vehicle?.model;
+
+  const handleConfirm = () => {
+    navigation.navigate('PreShiftOdometer');
+  };
 
   return (
     <ScreenContainer title="Start your shift" subtitle="Confirm vehicle assignment before continuing">
       <View style={styles.card}>
         <Text style={styles.label}>Assigned vehicle</Text>
-        <Text style={styles.value}>{vehicleRegistration ?? 'Not assigned'}</Text>
-        <Text style={styles.meta}>{assignedVehicle?.type ?? vehicle?.type ?? 'Select at depot'}</Text>
-        <Text style={styles.meta}>{assignedVehicle?.depot ?? vehicle?.depot ?? vehicle?.depot_name ?? 'Depot pending'}</Text>
+        <Text style={styles.value}>{vehicleRego ?? 'Not assigned'}</Text>
+        {(vehicleMake || vehicleModel) && (
+          <Text style={styles.meta}>{[vehicleMake, vehicleModel].filter(Boolean).join(' ')}</Text>
+        )}
       </View>
-      {status === 'loading' ? <Text style={styles.metaText}>Loading vehicle assignment...</Text> : null}
-      {status !== 'loading' && !state.vehicleId ? (
+
+      {status === 'loading' && (
+        <Text style={styles.metaText}>Loading vehicle assignment...</Text>
+      )}
+
+      {status !== 'loading' && !state.vehicleId && (
         <Text style={styles.errorText}>Vehicle not assigned. Please contact admin.</Text>
-      ) : null}
-      <Button label="Confirm vehicle" onPress={handleStart} disabled={status === 'loading' || !state.vehicleId} />
-      <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
-      <Text style={styles.buildStamp}>Build: {buildStamp}</Text>
+      )}
+
+      <Button
+        label="Confirm vehicle"
+        onPress={handleConfirm}
+        disabled={status === 'loading' || !state.vehicleId}
+      />
+      <Button
+        label="Back"
+        variant="ghost"
+        onPress={() => navigation.goBack()}
+      />
     </ScreenContainer>
   );
 }
@@ -75,11 +84,5 @@ const styles = StyleSheet.create({
   metaText: {
     color: '#6B7280',
     marginTop: 8,
-  },
-  buildStamp: {
-    color: '#9CA3AF',
-    fontSize: 12,
-    marginTop: 12,
-    textAlign: 'center',
   },
 });
