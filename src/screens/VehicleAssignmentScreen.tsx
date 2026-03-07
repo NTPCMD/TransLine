@@ -17,8 +17,8 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
     setErrorMessage(null);
     try {
       await refresh(true);
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : 'Unable to verify assignment.');
+    } catch (err) {
+      setErrorMessage(err instanceof Error ? err.message : 'Unable to verify assignment.');
     }
   }, [refresh]);
 
@@ -29,21 +29,11 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
   );
 
   useEffect(() => {
-    if (error) {
-      console.warn('Vehicle assignment check failed:', error);
-    }
-  }, [error]);
-
-  useEffect(() => {
     if (status === 'error') {
       setErrorMessage(error ?? 'Unable to verify assignment.');
-      return;
-    }
-    if (status === 'unassigned') {
+    } else if (status === 'unassigned') {
       setErrorMessage('Vehicle not assigned. Please contact admin.');
-      return;
-    }
-    if (status === 'loading') {
+    } else if (status === 'loading') {
       setErrorMessage(null);
     }
   }, [status, error]);
@@ -56,6 +46,10 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
     navigation.navigate('PreStartChecklist', { vehicleId: vehicle.id });
   };
 
+  const vehicleLabel = vehicle?.rego
+    ? `${vehicle.rego}${vehicle.make || vehicle.model ? ` — ${[vehicle.make, vehicle.model].filter(Boolean).join(' ')}` : ''}`
+    : null;
+
   return (
     <ScreenContainer title="Vehicle assignment" subtitle="Confirm your assigned vehicle before starting">
       <View style={styles.card}>
@@ -66,15 +60,12 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
           <Text style={styles.error}>{errorMessage}</Text>
         ) : (
           <View>
-            <Text style={styles.vehicleText}>
-              {vehicle?.label ?? vehicle?.registration ?? vehicle?.rego ?? vehicle?.plate_number ?? 'Unknown registration'}
-            </Text>
-            {vehicle?.type ? <Text style={styles.meta}>Type: {vehicle.type}</Text> : null}
-            {vehicle?.depot ? <Text style={styles.meta}>Depot: {vehicle.depot}</Text> : null}
+            <Text style={styles.vehicleText}>{vehicleLabel ?? 'Unknown vehicle'}</Text>
             {vehicle?.id ? <Text style={styles.meta}>Vehicle ID: {vehicle.id}</Text> : null}
           </View>
         )}
       </View>
+
       <Pressable
         onPress={() => setIsConfirmed(prev => !prev)}
         style={[styles.checkboxRow, (status !== 'assigned' || !vehicle) && styles.checkboxRowDisabled]}
@@ -85,12 +76,18 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
         </View>
         <Text style={styles.checkboxLabel}>I confirm this is the vehicle I'm inspecting</Text>
       </Pressable>
+
       <Button
         label="Start Pre-Start Inspection"
         onPress={handleStartChecklist}
         disabled={status !== 'assigned' || !vehicle || !isConfirmed}
       />
-      <Button label="Refresh assignment" variant="ghost" onPress={loadAssignment} disabled={status === 'loading'} />
+      <Button
+        label="Refresh assignment"
+        variant="ghost"
+        onPress={loadAssignment}
+        disabled={status === 'loading'}
+      />
       <Button
         label="Log out"
         variant="ghost"
