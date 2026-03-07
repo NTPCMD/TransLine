@@ -7,18 +7,19 @@ import ScreenContainer from '../components/ScreenContainer';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import { useAppState } from '../state/AppStateContext';
 import { useDriver } from '../state/DriverContext';
+import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
 export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
   const { navigation } = props;
-  const { state } = useAppState();
+  const { state, createEvent } = useAppState();
   const { currentDriver: driver, currentVehicle: assigned } = useDriver();
   const [now, setNow] = useState(Date.now());
-  const [showMenu, setShowMenu] = useState(false);
   const [hasLocationFix, setHasLocationFix] = useState(false);
   const [driverCoordinate, setDriverCoordinate] = useState<[number, number] | null>(null);
   const [driverHeading, setDriverHeading] = useState<number | null>(null);
   const [lastFixTime, setLastFixTime] = useState<Date | null>(null);
+  const [lastSyncTime, setLastSyncTime] = useState<Date | null>(null);
   const [permissionStatus, setPermissionStatus] = useState<Location.PermissionStatus>(Location.PermissionStatus.UNDETERMINED);
   const watchRef = useRef<Location.LocationSubscription | null>(null);
   const trackingActive = Boolean(state.shiftStartTime);
@@ -34,6 +35,25 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
     return status;
   };
 
+  const sendLocationToSupabase = async (location: Location.LocationObject) => {
+    if (!state.activeShiftId) return;
+    try {
+      await supabase.from('driver_presence').upsert({
+        driver_id: state.driverRecordId,
+        shift_id: state.activeShiftId,
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        heading: location.coords.heading ?? null,
+        accuracy: location.coords.accuracy ?? null,
+        last_seen_at: new Date(location.timestamp).toISOString(),
+        is_online: true,
+      }, { onConflict: 'driver_id' });
+      setLastSyncTime(new Date());
+    } catch (err) {
+      console.warn('[ActiveShift] Failed to update driver presence:', err);
+    }
+  };
+
   const handleLocationUpdate = (location: Location.LocationObject) => {
     setHasLocationFix(true);
     setLastFixTime(new Date(location.timestamp));
@@ -41,6 +61,7 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
     if (typeof location.coords.heading === 'number' && !Number.isNaN(location.coords.heading)) {
       setDriverHeading(location.coords.heading);
     }
+    sendLocationToSupabase(location);
   };
 
   const startLocationWatch = async () => {
@@ -66,9 +87,7 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
       watchRef.current = null;
       return;
     }
-
     startLocationWatch();
-
     return () => {
       watchRef.current?.remove();
       watchRef.current = null;
@@ -86,9 +105,7 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
   const handleRefreshLocation = async () => {
     const status = await updatePermissionStatus();
     if (status !== Location.PermissionStatus.GRANTED) return;
-    const location = await Location.getCurrentPositionAsync({
-      accuracy: Location.Accuracy.Highest,
-    });
+    const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Highest });
     handleLocationUpdate(location);
   };
 
@@ -116,27 +133,36 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
     return `${hours}h ${minutes}m`;
   };
 
+  const vehicleLabel = state.vehicleRegistration
+    ?? state.assignedVehicle?.rego
+    ?? assigned?.rego
+    ?? 'No vehicle';
+
+  const gpsStatus = permissionStatus !== Location.PermissionStatus.GRANTED
+    ? 'No permission'
+    : hasLocationFix ? 'Active' : 'Waiting';
+
+  const syncLabel = lastSyncTime ? lastSyncTime.toLocaleTimeString() : 'Not synced';
+
   return (
     <ScreenContainer>
       <NetworkStatusBanner />
-      {/* Top banner */}
       <View style={styles.banner}>
         <View style={styles.bannerLeft}>
           <View style={styles.dot} />
           <View>
             <Text style={styles.bannerText}>ON SHIFT</Text>
             <Text style={{ color: '#fff', fontSize: 12 }}>
-              {driver?.name ?? 'Driver'} • {state.vehicleRegistration ?? assigned?.registration ?? 'No vehicle'}
+              {driver?.name ?? 'Driver'} • {vehicleLabel}
             </Text>
           </View>
         </View>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => {
-            // Type guard to check if navigation has openDrawer method
             if ('openDrawer' in navigation && typeof navigation.openDrawer === 'function') {
               navigation.openDrawer();
             }
-          }} 
+          }}
           style={styles.menuButton}
         >
           <Text style={{ color: '#fff' }}>Menu</Text>
@@ -150,11 +176,11 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
         </View>
         <View style={styles.metricItem}>
           <Text style={styles.metricLabel}>GPS</Text>
-          <Text style={styles.metricValue}>{'Active'}</Text>
+          <Text style={styles.metricValue}>{gpsStatus}</Text>
         </View>
         <View style={styles.metricItem}>
           <Text style={styles.metricLabel}>Sync</Text>
-          <Text style={styles.metricValue}>Just now</Text>
+          <Text style={styles.metricValue}>{syncLabel}</Text>
         </View>
       </View>
 
@@ -202,10 +228,10 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
         </View>
 
         <View style={{ marginTop: 12 }}>
-          <Button 
-            label={`Offline Queue ${state.queuedEventsCount > 0 ? `(${state.queuedEventsCount})` : ''}`} 
-            variant="ghost" 
-            onPress={() => navigation.navigate('OfflineQueue')} 
+          <Button
+            label={`Offline Queue${state.queuedEventsCount > 0 ? ` (${state.queuedEventsCount})` : ''}`}
+            variant="ghost"
+            onPress={() => navigation.navigate('OfflineQueue')}
           />
         </View>
 
@@ -240,9 +266,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '700',
   },
-  menuButton: {
-    padding: 8,
-  },
+  menuButton: { padding: 8 },
   metricsRow: {
     backgroundColor: '#F2F2F2',
     padding: 12,
@@ -257,10 +281,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 12,
   },
-  statusLabel: {
-    color: '#6B7280',
-    fontSize: 12,
-  },
+  statusLabel: { color: '#6B7280', fontSize: 12 },
   statusValue: {
     fontWeight: '600',
     fontSize: 12,
@@ -268,10 +289,7 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     flexShrink: 1,
   },
-  buttonRow: {
-    marginTop: 12,
-    gap: 8,
-  },
+  buttonRow: { marginTop: 12, gap: 8 },
   grid: {
     marginTop: 12,
     flexDirection: 'row',
