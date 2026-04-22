@@ -15,9 +15,9 @@ export default function ShiftDetailsScreen(props: ScreenProps<'ShiftDetails'>) {
   return (
     <ScreenContainer title="Shift details" subtitle="Review current shift information">
       <InfoCard title="Vehicle">
-        <Text style={styles.text}>{state.vehicleRegistration ?? state.assignedVehicle?.registration ?? 'Not assigned'}</Text>
-        <Text style={styles.meta}>{state.assignedVehicle?.type ?? 'Vehicle type pending'}</Text>
-        <Text style={styles.meta}>{state.assignedVehicle?.depot ?? 'Depot pending'}</Text>
+        <Text style={styles.text}>{state.vehicleRegistration ?? state.assignedVehicle?.rego ?? 'Not assigned'}</Text>
+        <Text style={styles.meta}>{state.assignedVehicle?.make ?? 'Vehicle make pending'}</Text>
+        <Text style={styles.meta}>{state.assignedVehicle?.model ?? 'Vehicle model pending'}</Text>
       </InfoCard>
       <InfoCard title="Times">
         <Text style={styles.text}>Started: {state.shiftStartTime ? state.shiftStartTime.toLocaleTimeString() : 'Not set'}</Text>

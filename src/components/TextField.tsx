@@ -1,14 +1,8 @@
 import React from 'react';
-import { View, Text, TextInput, StyleSheet, KeyboardTypeOptions } from 'react-native';
+import { View, Text, TextInput, StyleSheet, type TextInputProps } from 'react-native';
 
-interface TextFieldProps {
+interface TextFieldProps extends TextInputProps {
   label: string;
-  value: string;
-  onChangeText: (text: string) => void;
-  placeholder?: string;
-  secureTextEntry?: boolean;
-  keyboardType?: KeyboardTypeOptions;
-  multiline?: boolean;
 }
 
 export default function TextField({
@@ -19,6 +13,7 @@ export default function TextField({
   secureTextEntry,
   keyboardType,
   multiline,
+  ...restProps
 }: TextFieldProps) {
   return (
     <View style={styles.container}>
@@ -31,6 +26,7 @@ export default function TextField({
         keyboardType={keyboardType}
         multiline={multiline}
         style={[styles.input, multiline && styles.multiline]}
+        {...restProps}
       />
     </View>
   );

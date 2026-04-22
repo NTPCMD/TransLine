@@ -1,4 +1,14 @@
+import { fetchDriverContext } from './driverSession';
 import { supabase } from './supabase';
+
+export interface ActiveVehicleAssignmentRecord {
+  id?: string;
+  driver_id?: string | null;
+  vehicle_id: string;
+  assigned_at?: string | null;
+  unassigned_at: string | null;
+  [key: string]: any;
+}
 
 export interface AssignedVehicleInfo {
   id: string;
@@ -8,75 +18,184 @@ export interface AssignedVehicleInfo {
   type: string | null;
   depot: string | null;
   depot_name?: string | null;
-  assigned_driver_id: string | null;
-  assigned_at?: string;
-  [key: string]: any; // Allow extra fields from DB
+  assigned_driver_id?: string | null;
+  assigned_at?: string | null;
+  [key: string]: any;
 }
 
 /**
- * Get a display label for a vehicle from available fields
+ * Get a display label for a vehicle from available fields.
  */
 export function getVehicleLabel(vehicle: AssignedVehicleInfo | null): string {
   if (!vehicle) return 'Unknown';
-  // Try common registration fields in order
   if (vehicle.registration) return vehicle.registration;
   if (vehicle.rego) return vehicle.rego;
   if (vehicle.plate_number) return vehicle.plate_number;
-  // Fallback to ID
   return `Vehicle ${vehicle.id.slice(0, 6)}`;
 }
 
-/**
- * Fetch the currently assigned vehicle for the authenticated user.
- * Single source of truth: vehicles.assigned_driver_id = auth.uid()
- *
- * Returns: { vehicle, error }
- *   - vehicle: null if no assignment found
- *   - error: optional error message
- */
-export async function getAssignedVehicleForCurrentUser(): Promise<{
+async function fetchActiveAssignmentByDriverId(driverId: string): Promise<{
+  assignment: ActiveVehicleAssignmentRecord | null;
   vehicle: AssignedVehicleInfo | null;
-  assignmentSource: 'vehicles.assigned_driver_id' | null;
+  assignmentSource: 'vehicle_assignments' | null;
   error?: string;
 }> {
-  try {
-    // Get current session
-    const { data: sessionData } = await supabase.auth.getSession();
-    const authUserId = sessionData?.session?.user?.id;
+  const { data, error } = await supabase
+    .from('vehicle_assignments')
+    .select('*')
+    .eq('driver_id', driverId)
+    .is('unassigned_at', null)
+    .order('assigned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-    if (!authUserId) {
-      console.log('[Assignment] ✗ No authenticated user');
-      return { vehicle: null, assignmentSource: null };
+  console.log('ASSIGNMENT driver.id =', driverId);
+  console.log('ASSIGNMENT result =', data);
+  console.log('ASSIGNMENT error =', error);
+
+  if (error) {
+    const normalizedMessage = error.message.toLowerCase();
+    if (
+      normalizedMessage.includes('0 rows') ||
+      normalizedMessage.includes('multiple') ||
+      normalizedMessage.includes('cannot coerce') ||
+      normalizedMessage.includes('single json object')
+    ) {
+      return {
+        assignment: null,
+        vehicle: null,
+        assignmentSource: null,
+      };
     }
 
-    console.log('[Assignment] Auth user ID:', authUserId);
+    const errorMsg = `Failed to fetch vehicle assignment: ${error.message}`;
+    console.error('[Assignment] ✗', errorMsg, { driverId });
+    return {
+      assignment: null,
+      vehicle: null,
+      assignmentSource: null,
+      error: errorMsg,
+    };
+  }
 
-    // SINGLE SOURCE OF TRUTH: vehicles.assigned_driver_id = auth.uid()
-    console.log('[Assignment] Querying vehicles WHERE assigned_driver_id = auth.uid()');
-    const { data: vehicle, error: err } = await supabase
+  let vehicle: AssignedVehicleInfo | null = null;
+
+  if ((data as any)?.vehicle_id) {
+    const { data: vehicleData, error: vehicleError } = await supabase
       .from('vehicles')
-      .select('id, registration, rego, plate_number, type, depot, assigned_driver_id, assigned_at')
-      .eq('assigned_driver_id', authUserId)
+      .select('id, rego, make, model, registration, plate_number, type, depot, depot_name')
+      .eq('id', (data as any).vehicle_id)
       .limit(1)
       .maybeSingle();
 
-    if (err) {
-      const errorMsg = `Failed to fetch assigned vehicle: ${err.message}`;
-      console.error('[Assignment] ✗', errorMsg);
-      return { vehicle: null, assignmentSource: null, error: errorMsg };
+    console.log('VEHICLE FETCH =', vehicleData);
+
+    if (vehicleError) {
+      const normalizedMessage = vehicleError.message.toLowerCase();
+      if (!normalizedMessage.includes('0 rows')) {
+        const errorMsg = `Failed to fetch vehicle: ${vehicleError.message}`;
+        console.error('[Assignment] ✗', errorMsg, { vehicleId: (data as any).vehicle_id });
+        return {
+          assignment: null,
+          vehicle: null,
+          assignmentSource: null,
+          error: errorMsg,
+        };
+      }
     }
 
-    if (vehicle) {
-      const label = getVehicleLabel(vehicle);
-      console.log('[Assignment] ✓ Found assigned vehicle:', { id: vehicle.id, label });
-      return { vehicle, assignmentSource: 'vehicles.assigned_driver_id' };
+    if (vehicleData) {
+      vehicle = {
+        id: vehicleData.id,
+        registration: vehicleData.registration ?? null,
+        rego: vehicleData.rego ?? null,
+        plate_number: vehicleData.plate_number ?? null,
+        make: vehicleData.make ?? null,
+        model: vehicleData.model ?? null,
+        type: vehicleData.type ?? null,
+        depot: vehicleData.depot ?? vehicleData.depot_name ?? null,
+        depot_name: vehicleData.depot_name ?? null,
+      } as AssignedVehicleInfo;
+    }
+  }
+
+  return {
+    assignment: data
+      ? {
+          id: (data as any).id,
+          driver_id: (data as any).driver_id ?? null,
+          vehicle_id: (data as any).vehicle_id,
+          assigned_at: (data as any).assigned_at ?? null,
+          unassigned_at: (data as any).unassigned_at ?? null,
+        }
+      : null,
+    vehicle,
+    assignmentSource: vehicle ? 'vehicle_assignments' : null,
+  };
+}
+
+export async function getAssignedVehicleForDriver(driverId: string): Promise<{
+  assignment: ActiveVehicleAssignmentRecord | null;
+  vehicle: AssignedVehicleInfo | null;
+  assignmentSource: 'vehicle_assignments' | null;
+  error?: string;
+}> {
+  if (!driverId) {
+    return { assignment: null, vehicle: null, assignmentSource: null };
+  }
+
+  return fetchActiveAssignmentByDriverId(driverId);
+}
+
+/**
+ * Fetch the active vehicle assignment for the authenticated user.
+ * Source of truth: vehicle_assignments where unassigned_at IS NULL.
+ */
+export async function getAssignedVehicleForCurrentUser(): Promise<{
+  assignment: ActiveVehicleAssignmentRecord | null;
+  vehicle: AssignedVehicleInfo | null;
+  assignmentSource: 'vehicle_assignments' | null;
+  error?: string;
+}> {
+  try {
+    const { driver, error } = await fetchDriverContext();
+
+    if (error && !driver) {
+      return {
+        assignment: null,
+        vehicle: null,
+        assignmentSource: null,
+        error,
+      };
     }
 
-    console.log('[Assignment] ✗ No vehicle assigned to this user. Please contact admin.');
-    return { vehicle: null, assignmentSource: null };
+    if (!driver?.id) {
+      return {
+        assignment: null,
+        vehicle: null,
+        assignmentSource: null,
+        error: 'Driver profile not found for assignment lookup.',
+      };
+    }
+
+    const result = await fetchActiveAssignmentByDriverId(driver.id);
+
+    if (result.vehicle) {
+      console.log('[Assignment] ✓ Active assignment found', {
+        driverId: driver.id,
+        vehicleId: result.vehicle.id,
+        rego: getVehicleLabel(result.vehicle),
+      });
+    } else {
+      console.log('[Assignment] ✗ No active vehicle assignment found', {
+        driverId: driver.id,
+      });
+    }
+
+    return result;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown error';
     console.error('[Assignment] Exception:', message);
-    return { vehicle: null, assignmentSource: null, error: message };
+    return { assignment: null, vehicle: null, assignmentSource: null, error: message };
   }
 }

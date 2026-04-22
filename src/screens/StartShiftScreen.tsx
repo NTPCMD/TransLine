@@ -22,7 +22,8 @@ export default function StartShiftScreen(props: ScreenProps<'StartShift'>) {
   const vehicleModel = assignedVehicle?.model ?? vehicle?.model;
 
   const handleConfirm = () => {
-    navigation.navigate('PreShiftOdometer');
+    if (!state.vehicleId) return;
+    navigation.navigate('PreStartChecklist', { vehicleId: state.vehicleId });
   };
 
   return (

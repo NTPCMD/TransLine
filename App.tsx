@@ -15,6 +15,7 @@ const BUILD_STAMP = 'APP BUILD: transline-driver-fullflow-2026-02-02';
 
 import SplashScreen from './src/screens/SplashScreen';
 import LoginScreen from './src/screens/LoginScreen';
+import DashboardScreen from './src/screens/DashboardScreen';
 import VehicleAssignmentScreen from './src/screens/VehicleAssignmentScreen';
 import DriverDeclarationScreen from './src/screens/DriverDeclarationScreen';
 import StartShiftScreen from './src/screens/StartShiftScreen';
@@ -43,7 +44,8 @@ const Drawer = createDrawerNavigator();
 
 function MainDrawer() {
   return (
-    <Drawer.Navigator initialRouteName="ActiveShift" screenOptions={{ headerShown: false }}>
+    <Drawer.Navigator initialRouteName="Dashboard" screenOptions={{ headerShown: false }}>
+      <Drawer.Screen name="Dashboard" component={DashboardScreen as any} />
       <Drawer.Screen name="ActiveShift" component={ActiveShiftScreen as any} />
       <Drawer.Screen name="ShiftDetails" component={ShiftDetailsScreen as any} />
       <Drawer.Screen name="FuelLog" component={FuelLogScreen as any} />
@@ -72,6 +74,7 @@ function RootNavigator() {
     <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
       <Stack.Screen name="Splash" component={SplashScreen as any} />
       <Stack.Screen name="Login" component={LoginScreen as any} />
+      <Stack.Screen name="Dashboard" component={DashboardScreen as any} />
       <Stack.Screen name="VehicleAssignment" component={VehicleAssignmentScreen as any} />
       <Stack.Screen name="DriverDeclaration" component={DriverDeclarationScreen as any} />
       <Stack.Screen name="StartShift" component={StartShiftScreen as any} />
@@ -100,10 +103,12 @@ function RootNavigator() {
 }
 
 function AppContent() {
-  const { currentDriver } = useDriver();
+  const { authUserId, currentDriver, currentProfile } = useDriver();
 
   return (
-    <ActiveShiftProvider driverId={currentDriver?.id ?? null}>
+    <ActiveShiftProvider
+      driverId={currentDriver?.id ?? currentProfile?.id ?? currentDriver?.profile_id ?? authUserId ?? null}
+    >
       <NavigationContainer>
         <RootNavigator />
       </NavigationContainer>

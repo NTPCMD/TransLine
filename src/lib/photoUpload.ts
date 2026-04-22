@@ -1,15 +1,15 @@
 import { supabase } from './supabase';
 
 /**
- * Upload a shift photo (pre or post) to the shift-photos bucket.
- * Path: shift-photos/{shiftId}/{type}.jpg
+ * Upload a shift odometer photo (pre or post) to the odometer-photos bucket.
+ * Path: odometer-photos/shifts/{shiftId}/{type}-{timestamp}.jpg
  */
 export async function uploadShiftPhoto(
   shiftId: string,
   type: 'pre' | 'post',
   photoUri: string
 ): Promise<{ path: string; error?: string }> {
-  const storagePath = `${shiftId}/${type}.jpg`;
+  const storagePath = `shifts/${shiftId}/${type}-${Date.now()}.jpg`;
 
   let blob: Blob;
   try {
@@ -37,7 +37,7 @@ export async function uploadShiftPhoto(
   }
 
   const { error: uploadError } = await supabase.storage
-    .from('shift-photos')
+    .from('odometer-photos')
     .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true });
 
   if (uploadError) {

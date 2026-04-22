@@ -6,122 +6,177 @@ import { useAppState } from '../state/AppStateContext';
 import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
-type ChecklistItem = {
-  id: string;
-  label: string;
-  status: 'pass' | 'fail' | null;
-  note: string;
-  critical: boolean;
-};
+type ChecklistValue = 'pass' | 'fail' | null;
+
+const initialChecklistState = {
+  tyre_pressure: null,
+  tread_depth: null,
+  wheel_nuts: null,
+  headlights: null,
+  indicators: null,
+  brake_lights: null,
+  engine_oil: null,
+  coolant: null,
+  washer_fluid: null,
+  brake_test: null,
+  park_brake: null,
+  body_damage: null,
+  clean: null,
+  windscreen: null,
+  mirrors: null,
+} as const;
+
+type ChecklistKey = keyof typeof initialChecklistState;
 
 type ChecklistSection = {
   id: string;
   title: string;
-  items: ChecklistItem[];
-  expanded: boolean;
+  items: Array<{
+    key: ChecklistKey;
+    label: string;
+    critical: boolean;
+  }>;
 };
 
-const initialSections: ChecklistSection[] = [
+const initialNotesState: Record<ChecklistKey, string> = {
+  tyre_pressure: '',
+  tread_depth: '',
+  wheel_nuts: '',
+  headlights: '',
+  indicators: '',
+  brake_lights: '',
+  engine_oil: '',
+  coolant: '',
+  washer_fluid: '',
+  brake_test: '',
+  park_brake: '',
+  body_damage: '',
+  clean: '',
+  windscreen: '',
+  mirrors: '',
+};
+
+const initialExpandedState: Record<string, boolean> = {
+  tyres: true,
+  lights: false,
+  fluids: false,
+  brakes: false,
+  exterior: false,
+};
+
+const checklistSections: ChecklistSection[] = [
   {
     id: 'tyres',
     title: 'Tyres & Wheels',
-    expanded: true,
     items: [
-      { id: 'tyre-pressure', label: 'Tyre pressure adequate', status: null, note: '', critical: false },
-      { id: 'tyre-tread', label: 'Tread depth acceptable', status: null, note: '', critical: true },
-      { id: 'wheel-nuts', label: 'Wheel nuts secure', status: null, note: '', critical: true },
+      { key: 'tyre_pressure', label: 'Tyre pressure adequate', critical: false },
+      { key: 'tread_depth', label: 'Tread depth acceptable', critical: true },
+      { key: 'wheel_nuts', label: 'Wheel nuts secure', critical: true },
     ],
   },
   {
     id: 'lights',
     title: 'Lights & Indicators',
-    expanded: false,
     items: [
-      { id: 'headlights', label: 'Headlights working', status: null, note: '', critical: true },
-      { id: 'indicators', label: 'Indicators working', status: null, note: '', critical: true },
-      { id: 'brake-lights', label: 'Brake lights working', status: null, note: '', critical: true },
+      { key: 'headlights', label: 'Headlights working', critical: true },
+      { key: 'indicators', label: 'Indicators working', critical: true },
+      { key: 'brake_lights', label: 'Brake lights working', critical: true },
     ],
   },
   {
     id: 'fluids',
     title: 'Fluids',
-    expanded: false,
     items: [
-      { id: 'engine-oil', label: 'Engine oil level', status: null, note: '', critical: true },
-      { id: 'coolant', label: 'Coolant level', status: null, note: '', critical: true },
-      { id: 'washer-fluid', label: 'Washer fluid', status: null, note: '', critical: false },
+      { key: 'engine_oil', label: 'Engine oil level', critical: true },
+      { key: 'coolant', label: 'Coolant level', critical: true },
+      { key: 'washer_fluid', label: 'Washer fluid', critical: false },
     ],
   },
   {
     id: 'brakes',
     title: 'Brakes',
-    expanded: false,
     items: [
-      { id: 'brake-function', label: 'Brake function test', status: null, note: '', critical: true },
-      { id: 'park-brake', label: 'Park brake working', status: null, note: '', critical: true },
+      { key: 'brake_test', label: 'Brake function test', critical: true },
+      { key: 'park_brake', label: 'Park brake working', critical: true },
     ],
   },
   {
     id: 'exterior',
     title: 'Exterior Damage',
-    expanded: false,
     items: [
-      { id: 'body-damage', label: 'No visible body damage', status: null, note: '', critical: false },
-      { id: 'vehicle-clean', label: 'Is the vehicle clean?', status: null, note: '', critical: false },
-      { id: 'windscreen', label: 'Windscreen intact', status: null, note: '', critical: true },
-      { id: 'mirrors', label: 'Mirrors intact and clean', status: null, note: '', critical: false },
+      { key: 'body_damage', label: 'No visible body damage', critical: false },
+      { key: 'clean', label: 'Is the vehicle clean?', critical: false },
+      { key: 'windscreen', label: 'Windscreen intact', critical: true },
+      { key: 'mirrors', label: 'Mirrors intact and clean', critical: false },
     ],
   },
 ];
 
 export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChecklist'>) {
   const { navigation } = props;
-  const { state } = useAppState();
+  const { state, submitPreStartChecklist } = useAppState();
   const vehicleId = props.route.params?.vehicleId ?? null;
-  const [sections, setSections] = useState<ChecklistSection[]>(initialSections);
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(initialExpandedState);
+  const [checklist, setChecklist] = useState<Record<ChecklistKey, ChecklistValue>>({
+    ...initialChecklistState,
+  });
+  const [notes, setNotes] = useState<Record<ChecklistKey, string>>(initialNotesState);
   const [submissionError, setSubmissionError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const checklistAnswers = useMemo(() => {
+    return checklistSections.flatMap(section =>
+      section.items.map(item => ({
+        id: item.key,
+        label: item.label,
+        status: checklist[item.key],
+        note: notes[item.key],
+        critical: item.critical,
+        sectionTitle: section.title,
+      }))
+    );
+  }, [checklist, notes]);
+
   const checksPayload = useMemo(() => {
-    return sections.reduce<Record<string, unknown>>((acc, section) => {
-      section.items.forEach(item => {
-        acc[item.id] = {
-          status: item.status,
-          note: item.note,
-          critical: item.critical,
-          label: item.label,
-          section: section.title,
-        };
-      });
+    return checklistAnswers.reduce<Record<string, unknown>>((acc, item) => {
+      acc[item.id] = {
+        status: item.status,
+        note: item.note,
+        critical: item.critical,
+        label: item.label,
+        section: item.sectionTitle,
+      };
       return acc;
     }, {});
-  }, [sections]);
+  }, [checklistAnswers]);
 
   const toggleSection = (sectionId: string) => {
-    setSections(prev => prev.map(s => (s.id === sectionId ? { ...s, expanded: !s.expanded } : s)));
+    setExpandedSections(prev => ({ ...prev, [sectionId]: !prev[sectionId] }));
   };
 
-  const updateItemStatus = (sectionId: string, itemId: string, status: 'pass' | 'fail') => {
-    setSections(prev => prev.map(section =>
-      section.id === sectionId
-        ? { ...section, items: section.items.map(item => (item.id === itemId ? { ...item, status } : item)) }
-        : section
-    ));
+  const setCheck = (key: ChecklistKey, value: 'pass' | 'fail') => {
+    setChecklist(prev => ({
+      ...prev,
+      [key]: value,
+    }));
   };
 
-  const updateItemNote = (sectionId: string, itemId: string, note: string) => {
-    setSections(prev => prev.map(section =>
-      section.id === sectionId
-        ? { ...section, items: section.items.map(item => (item.id === itemId ? { ...item, note } : item)) }
-        : section
-    ));
+  const updateItemNote = (key: ChecklistKey, note: string) => {
+    setNotes(prev => ({
+      ...prev,
+      [key]: note,
+    }));
   };
 
-  const hasFailedItems = sections.some(section => section.items.some(item => item.status === 'fail'));
-  const hasCriticalFailures = sections.some(section => section.items.some(item => item.status === 'fail' && item.critical));
-  const allItemsCompleted = sections.every(section => section.items.every(item => item.status !== null));
-  const failedItemsHaveNotes = sections.every(section => section.items.every(item => item.status !== 'fail' || (item.status === 'fail' && item.note.trim() !== '')));
-  const canSubmit = allItemsCompleted && failedItemsHaveNotes;
+  const allAnswered = Object.values(checklist).every(value => value !== null);
+  const hasFail = Object.values(checklist).includes('fail');
+  const hasCriticalFailures = checklistSections.some(section =>
+    section.items.some(item => checklist[item.key] === 'fail' && item.critical)
+  );
+  const failedItemsHaveNotes = checklistAnswers.every(
+    item => item.status !== 'fail' || item.note.trim().length > 0
+  );
+  const canSubmit = allAnswered && failedItemsHaveNotes && !isSubmitting && Boolean(vehicleId);
 
   const resolveAuthUserId = async () => {
     if (state.userId) return state.userId;
@@ -200,12 +255,41 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
 
   const submitChecklist = async () => {
     if (isSubmitting) return;
+
+    if (!allAnswered) {
+      Alert.alert('Complete all checks', 'Please answer every inspection item before continuing.');
+      return;
+    }
+
+    if (!failedItemsHaveNotes) {
+      Alert.alert('Add failure notes', 'Please describe the issue for each failed check.');
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmissionError(null);
-    const saved = await saveChecklist('submitted');
+
+    const result = await submitPreStartChecklist({
+      answers: checklistAnswers,
+      hasFailures: hasFail,
+      hasCriticalFailures,
+      assignmentVehicleId: vehicleId,
+    });
+
     setIsSubmitting(false);
-    if (!saved) return;
-    Alert.alert('Checklist submitted', 'Checklist saved successfully.');
+
+    if (!result.ok) {
+      setSubmissionError(result.error ?? 'Unable to submit checklist.');
+      return;
+    }
+
+    Alert.alert(
+      'Checklist submitted',
+      hasFail
+        ? 'Checklist submitted with issues. Operations will be notified.'
+        : 'Checklist saved successfully.'
+    );
+
     if (hasCriticalFailures) {
       navigation.navigate('WaitForInstruction');
     } else {
@@ -233,47 +317,69 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
         </View>
       ) : null}
 
-      {hasFailedItems && (
+      {hasFail && (
         <View style={styles.alertBox}>
           <Text style={styles.alertText}>Failed items will notify operations</Text>
         </View>
       )}
 
       <ScrollView style={{ flex: 1 }} contentContainerStyle={{ paddingBottom: 24 }}>
-        {sections.map(section => (
+        {checklistSections.map(section => (
           <View key={section.id} style={styles.sectionCard}>
             <Pressable onPress={() => toggleSection(section.id)} style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>{section.title}</Text>
-              <Text style={styles.sectionToggle}>{section.expanded ? '-' : '+'}</Text>
+              <Text style={styles.sectionToggle}>{expandedSections[section.id] ? '-' : '+'}</Text>
             </Pressable>
 
-            {section.expanded && (
+            {expandedSections[section.id] && (
               <View style={styles.sectionBody}>
                 {section.items.map(item => (
-                  <View key={item.id} style={styles.itemRow}>
+                  <View key={item.key} style={styles.itemRow}>
                     <View style={{ flex: 1 }}>
                       <Text style={styles.itemLabel}>{item.label}</Text>
                     </View>
                     <View style={styles.itemButtons}>
                       <Pressable
-                        onPress={() => updateItemStatus(section.id, item.id, 'pass')}
-                        style={[styles.smallBtn, item.status === 'pass' ? styles.passActive : styles.passInactive]}
+                        onPress={() => setCheck(item.key, 'pass')}
+                        style={[
+                          styles.smallBtn,
+                          checklist[item.key] === 'pass' ? styles.passActive : styles.passInactive,
+                        ]}
                       >
-                        <Text style={item.status === 'pass' ? styles.smallBtnTextActive : styles.smallBtnTextInactive}>Pass</Text>
+                        <Text
+                          style={
+                            checklist[item.key] === 'pass'
+                              ? styles.smallBtnTextActive
+                              : styles.smallBtnTextInactive
+                          }
+                        >
+                          Pass
+                        </Text>
                       </Pressable>
                       <Pressable
-                        onPress={() => updateItemStatus(section.id, item.id, 'fail')}
-                        style={[styles.smallBtn, item.status === 'fail' ? styles.failActive : styles.failInactive]}
+                        onPress={() => setCheck(item.key, 'fail')}
+                        style={[
+                          styles.smallBtn,
+                          checklist[item.key] === 'fail' ? styles.failActive : styles.failInactive,
+                        ]}
                       >
-                        <Text style={item.status === 'fail' ? styles.smallBtnTextActive : styles.smallBtnTextInactive}>Fail</Text>
+                        <Text
+                          style={
+                            checklist[item.key] === 'fail'
+                              ? styles.smallBtnTextActive
+                              : styles.smallBtnTextInactive
+                          }
+                        >
+                          Fail
+                        </Text>
                       </Pressable>
                     </View>
 
-                    {item.status === 'fail' && (
+                    {checklist[item.key] === 'fail' && (
                       <TextInput
                         placeholder="Required: Describe the issue"
-                        value={item.note}
-                        onChangeText={text => updateItemNote(section.id, item.id, text)}
+                        value={notes[item.key]}
+                        onChangeText={text => updateItemNote(item.key, text)}
                         multiline
                         style={styles.noteInput}
                       />

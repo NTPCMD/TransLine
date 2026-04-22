@@ -5,9 +5,10 @@ import { supabase } from './supabase';
  */
 export async function startShift(params: {
   p_driver_id: string;
-  p_device_info?: string | null;
   p_start_lat?: number | null;
   p_start_lng?: number | null;
+  p_checklist?: Record<string, unknown> | null;
+  p_device_info?: Record<string, unknown> | null;
 }): Promise<{ shiftId: string | null; error?: string }> {
   const { data, error } = await supabase.rpc('start_shift', params);
   if (error) {

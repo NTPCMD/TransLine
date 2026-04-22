@@ -53,7 +53,11 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
           if (fromCamera && onCaptureMeta) {
             const capturedAt = new Date().toISOString();
             let locationDenied = false;
-            let location = { lat: null, lng: null, accuracy: null };
+            let location: { lat: number | null; lng: number | null; accuracy: number | null } = {
+              lat: null,
+              lng: null,
+              accuracy: null,
+            };
             try {
               const fix = await getGpsFix();
               location = { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };
@@ -105,7 +109,11 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
 
       if (onCaptureMeta) {
         let locationDenied = false;
-        let location = { lat: null, lng: null, accuracy: null };
+        let location: { lat: number | null; lng: number | null; accuracy: number | null } = {
+          lat: null,
+          lng: null,
+          accuracy: null,
+        };
         try {
           const fix = await getGpsFix();
           location = { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };

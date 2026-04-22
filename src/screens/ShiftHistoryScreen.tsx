@@ -8,6 +8,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
+import Button from '../components/Button';
 import { useDriver } from '../state/DriverContext';
 import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
@@ -80,6 +81,15 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
   const onRefresh = () => {
     setRefreshing(true);
     loadShifts();
+  };
+
+  const handleBack = () => {
+    if (navigation.canGoBack()) {
+      navigation.goBack();
+      return;
+    }
+
+    navigation.navigate('Dashboard');
   };
 
   const formatDate = (dateString: string) => {
@@ -236,6 +246,7 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
   if (loading) {
     return (
       <ScreenContainer title="Shift History" subtitle="Loading...">
+        <Button label="Back" variant="ghost" onPress={handleBack} />
         <Text style={styles.loadingText}>Loading shift history...</Text>
       </ScreenContainer>
     );
@@ -244,6 +255,7 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
   if (shifts.length === 0) {
     return (
       <ScreenContainer title="Shift History" subtitle="No shifts found">
+        <Button label="Back" variant="ghost" onPress={handleBack} />
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>No shift history available</Text>
           <Text style={styles.emptyStateSubtext}>
@@ -256,6 +268,7 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
 
   return (
     <ScreenContainer title="Shift History" subtitle={`${shifts.length} shifts`}>
+      <Button label="Back" variant="ghost" onPress={handleBack} />
       <ScrollView
         style={styles.scrollView}
         showsVerticalScrollIndicator={false}

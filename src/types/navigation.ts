@@ -4,6 +4,7 @@ import type { DrawerScreenProps as DrawerProps } from '@react-navigation/drawer'
 export type RootStackParamList = {
   Splash: undefined;
   Login: undefined;
+  Dashboard: undefined;
   VehicleAssignment: undefined;
   DriverDeclaration: undefined;
   StartShift: undefined;
