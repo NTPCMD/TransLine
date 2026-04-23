@@ -43,6 +43,10 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
         return;
       }
 
+      console.log('[Login] auth success', {
+        authUserId: signInData?.user?.id ?? signInData?.session?.user?.id ?? null,
+      });
+
       const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
       console.log('[Login] getSession response', {
         authUserId: sessionData?.session?.user?.id ?? null,
@@ -50,11 +54,18 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
         error: sessionError?.message ?? null,
       });
 
-      const userId = sessionData?.session?.user?.id ?? null;
+      const userId =
+        signInData?.user?.id ??
+        signInData?.session?.user?.id ??
+        sessionData?.session?.user?.id ??
+        null;
+
       console.log('[Login] resolved auth user id', { authUserId: userId });
 
       if (!userId) {
+        console.error('[Login] auth succeeded but user id could not be resolved; routing via splash for recovery');
         Alert.alert('Authentication error', 'Unable to resolve your user session.');
+        navigation.replace('Splash');
         return;
       }
 

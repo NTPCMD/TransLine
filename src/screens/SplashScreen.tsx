@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Image, StyleSheet, Text, View } from 'react-native';
 import { fetchDriverContext } from '../lib/driverSession';
 import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
@@ -29,9 +29,7 @@ export default function SplashScreen(props: ScreenProps<'Splash'>) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.logo}> 
-        <Text style={styles.logoText}>T</Text>
-      </View>
+      <Image source={require('../../assets/transline-logo.png')} style={styles.logo} resizeMode="contain" />
       <Text style={styles.title}>Transline</Text>
       <Text style={styles.subtitle}>Compliance in motion</Text>
       <ActivityIndicator color="#C62828" style={styles.loader} size="large" />
@@ -47,18 +45,9 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFFFFF',
   },
   logo: {
-    width: 96,
-    height: 96,
-    borderRadius: 18,
-    backgroundColor: '#C62828',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 240,
+    height: 140,
     marginBottom: 16,
-  },
-  logoText: {
-    color: '#FFFFFF',
-    fontSize: 36,
-    fontWeight: '800',
   },
   title: {
     fontSize: 28,

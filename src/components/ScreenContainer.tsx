@@ -1,5 +1,5 @@
 import React from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Image, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 
 interface ScreenContainerProps {
   title?: string;
@@ -12,9 +12,7 @@ export default function ScreenContainer({ title, subtitle, children }: ScreenCon
     <SafeAreaView style={styles.safeArea}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.headerArea}>
-          <View style={styles.logoPlaceholder}>
-            <Text style={styles.logoText}>T</Text>
-          </View>
+          <Image source={require('../../assets/transline-logo.png')} style={styles.logoImage} resizeMode="contain" />
           <View>
             <Text style={styles.brand}>Transline</Text>
             <Text style={styles.tagline}>Compliance in motion</Text>
@@ -43,18 +41,9 @@ const styles = StyleSheet.create({
     gap: 12,
     marginBottom: 16,
   },
-  logoPlaceholder: {
-    width: 56,
+  logoImage: {
+    width: 88,
     height: 56,
-    borderRadius: 14,
-    backgroundColor: '#C62828',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  logoText: {
-    color: '#FFFFFF',
-    fontSize: 24,
-    fontWeight: '700',
   },
   brand: {
     fontSize: 22,

@@ -51,6 +51,7 @@
     "@babel/plugin-transform-optional-chaining": "^7.28.5",
     "@types/react": "~19.1.10",
     "babel-preset-expo": "~54.0.9",
+    "expo-module-scripts": "^4.1.10",
     "typescript": "~5.9.2"
   },
   "private": true

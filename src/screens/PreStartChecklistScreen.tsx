@@ -3,7 +3,6 @@ import { Alert, StyleSheet, Text, View, Pressable, TextInput, ScrollView } from 
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
-import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
 type ChecklistValue = 'pass' | 'fail' | null;
@@ -114,7 +113,7 @@ const checklistSections: ChecklistSection[] = [
 
 export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChecklist'>) {
   const { navigation } = props;
-  const { state, submitPreStartChecklist } = useAppState();
+  const { submitPreStartChecklist, updateAppState } = useAppState();
   const vehicleId = props.route.params?.vehicleId ?? null;
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(initialExpandedState);
   const [checklist, setChecklist] = useState<Record<ChecklistKey, ChecklistValue>>({
@@ -136,19 +135,6 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
       }))
     );
   }, [checklist, notes]);
-
-  const checksPayload = useMemo(() => {
-    return checklistAnswers.reduce<Record<string, unknown>>((acc, item) => {
-      acc[item.id] = {
-        status: item.status,
-        note: item.note,
-        critical: item.critical,
-        label: item.label,
-        section: item.sectionTitle,
-      };
-      return acc;
-    }, {});
-  }, [checklistAnswers]);
 
   const toggleSection = (sectionId: string) => {
     setExpandedSections(prev => ({ ...prev, [sectionId]: !prev[sectionId] }));
@@ -177,81 +163,6 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
     item => item.status !== 'fail' || item.note.trim().length > 0
   );
   const canSubmit = allAnswered && failedItemsHaveNotes && !isSubmitting && Boolean(vehicleId);
-
-  const resolveAuthUserId = async () => {
-    if (state.userId) return state.userId;
-    const { data } = await supabase.auth.getSession();
-    return data?.session?.user?.id ?? null;
-  };
-
-  const loadDraftId = async (driverId: string, vehicleIdValue: string) => {
-    const { data, error } = await supabase
-      .from('vehicle_checklists')
-      .select('id')
-      .eq('driver_id', driverId)
-      .eq('vehicle_id', vehicleIdValue)
-      .eq('status', 'draft')
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    return data?.id ?? null;
-  };
-
-  const saveChecklist = async (status: 'draft' | 'submitted') => {
-    if (!vehicleId) {
-      setSubmissionError('Missing vehicle selection. Please return to assignment.');
-      return false;
-    }
-
-    const driverId = await resolveAuthUserId();
-    if (!driverId) {
-      setSubmissionError('User not available. Please sign in again.');
-      return false;
-    }
-
-    const shiftId = state.activeShiftId ?? null;
-    const submittedAt = status === 'submitted' ? new Date().toISOString() : null;
-
-    try {
-      const draftId = await loadDraftId(driverId, vehicleId);
-      if (draftId) {
-        const { error } = await supabase
-          .from('vehicle_checklists')
-          .update({
-            checks: checksPayload,
-            shift_id: shiftId,
-            status,
-            submitted_at: submittedAt,
-          })
-          .eq('id', draftId);
-        if (error) {
-          throw new Error(error.message);
-        }
-        return true;
-      }
-
-      const { error } = await supabase.from('vehicle_checklists').insert({
-        driver_id: driverId,
-        vehicle_id: vehicleId,
-        shift_id: shiftId,
-        status,
-        checks: checksPayload,
-        submitted_at: submittedAt,
-      });
-      if (error) {
-        throw new Error(error.message);
-      }
-      return true;
-    } catch (error) {
-      setSubmissionError(error instanceof Error ? error.message : 'Unable to save checklist.');
-      return false;
-    }
-  };
 
   const submitChecklist = async () => {
     if (isSubmitting) return;
@@ -301,11 +212,13 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
     if (isSubmitting) return;
     setIsSubmitting(true);
     setSubmissionError(null);
-    const saved = await saveChecklist('draft');
+    updateAppState({
+      preStartChecklistAnswers: checklistAnswers,
+      checklistCompleted: false,
+      checklistSubmitted: false,
+    });
     setIsSubmitting(false);
-    if (saved) {
-      Alert.alert('Draft saved', 'Your checklist draft was saved.');
-    }
+    Alert.alert('Draft saved', 'Your checklist draft was saved on this device for this session.');
   };
 
   return (
