@@ -20,8 +20,6 @@ interface Shift {
   status: string;
   started_at: string;
   ended_at: string | null;
-  start_odometer: number | null;
-  end_odometer: number | null;
   vehicle_registration?: string;
 }
 
@@ -48,8 +46,6 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
           status,
           started_at,
           ended_at,
-          start_odometer,
-          end_odometer,
           vehicles!inner(registration)
         `)
         .eq('driver_id', authUserId)
@@ -224,18 +220,6 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
             {calculateDuration(shift.started_at, shift.ended_at)}
           </Text>
         </View>
-        {shift.start_odometer !== null && (
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Start Odometer:</Text>
-            <Text style={styles.detailValue}>{shift.start_odometer} km</Text>
-          </View>
-        )}
-        {shift.end_odometer !== null && (
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>End Odometer:</Text>
-            <Text style={styles.detailValue}>{shift.end_odometer} km</Text>
-          </View>
-        )}
       </View>
     </View>
   );

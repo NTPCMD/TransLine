@@ -54,6 +54,8 @@ export interface AppState {
   userId: string | null;
   driverRecordId: string | null;
   activeShiftId: string | null;
+  activeShiftVehicleId?: string | null;
+  activeShiftVehicleResolutionError?: string | null;
   queuedEventsCount: number;
 }
 
@@ -83,7 +85,7 @@ interface AppStateContextValue {
   createEvent: (
     eventType: string,
     metadata?: Record<string, unknown>,
-    options?: { queueOnError?: boolean }
+    options?: { queueOnError?: boolean; locationOverride?: { latitude: number; longitude: number } }
   ) => Promise<{ status: 'sent' | 'queued' | 'error'; error?: string }>;
   closeActiveBreak: (options?: { queueOnError?: boolean }) => Promise<{
     closed: boolean;
@@ -164,6 +166,8 @@ const initialState: AppState = {
   userId: null,
   driverRecordId: null,
   activeShiftId: null,
+  activeShiftVehicleId: null,
+  activeShiftVehicleResolutionError: null,
   queuedEventsCount: 0,
 };
 
@@ -589,9 +593,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [processEventQueue, processWriteQueue]);
 
   const createEvent = useCallback(
-    async (eventType: string, metadata: Record<string, unknown> = {}, options?: { queueOnError?: boolean }) => {
+    async (
+      eventType: string,
+      metadata: Record<string, unknown> = {},
+      options?: { queueOnError?: boolean; locationOverride?: { latitude: number; longitude: number } }
+    ) => {
       const queueOnError = options?.queueOnError ?? true;
-      const location = await resolveLocation();
+      const locationOverride = options?.locationOverride;
+      const location = locationOverride
+        ? {
+            coords: {
+              latitude: locationOverride.latitude,
+              longitude: locationOverride.longitude,
+              accuracy: null,
+            },
+          }
+        : await resolveLocation();
       const driverId = state.driverRecordId;
       if (!driverId) {
         return { status: 'error' as const, error: 'Driver profile not available.' };
@@ -967,8 +984,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       .from('shifts')
       .update({
         vehicle_id: assignmentVehicleId,
-        start_odometer: odometerValue,
-        start_odometer_photo_path: photoPath,
       })
       .eq('id', shiftId);
 
@@ -1063,22 +1078,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: rpcError ?? 'Failed to end shift.' };
     }
 
-    const { error: shiftEndUpdateError } = await supabase
-      .from('shifts')
-      .update({
-        end_odometer: payload.endOdometerValue,
-        end_odometer_photo_path: photoPath,
-      })
-      .eq('id', state.activeShiftId);
-
-    if (shiftEndUpdateError) {
-      console.warn('[ShiftEnd] Failed to persist end odometer details', {
-        shiftId: state.activeShiftId,
-        message: shiftEndUpdateError.message,
-      });
-    }
-
-    setState(prev => ({ ...prev, activeShiftId: null }));
+    setState(prev => ({ ...prev, activeShiftId: null, activeShiftVehicleId: null, activeShiftVehicleResolutionError: null }));
     return { ok: true };
   }, [state.activeShiftId, state.userId]);
 

@@ -30,18 +30,35 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     const loadShift = async () => {
       if (!state.activeShiftId) return;
       const { data, error } = await supabase
-        .from('shifts')
-        .select('start_odometer, end_odometer')
-        .eq('id', state.activeShiftId)
-        .maybeSingle();
+        .from('shift_events')
+        .select('event_type, created_at, metadata')
+        .eq('shift_id', state.activeShiftId)
+        .in('event_type', ['shift_start', 'shift_end'])
+        .order('created_at', { ascending: false });
       if (error) {
         setShiftLoadError(error.message);
         return;
       }
-      setStartOdometerValue(data?.start_odometer ?? null);
-      if (data?.end_odometer) {
+
+      const events = data ?? [];
+      const hasShiftEnd = events.some((event) => event.event_type === 'shift_end');
+      if (hasShiftEnd) {
         setShiftLoadError('End odometer already captured.');
       }
+
+      const shiftStartEvent = events.find((event) => event.event_type === 'shift_start');
+      const metadata = shiftStartEvent?.metadata && typeof shiftStartEvent.metadata === 'object'
+        ? (shiftStartEvent.metadata as Record<string, unknown>)
+        : null;
+      const odometerRaw = metadata?.odometer_value;
+      const odometerValue =
+        typeof odometerRaw === 'number'
+          ? odometerRaw
+          : typeof odometerRaw === 'string'
+            ? Number(odometerRaw)
+            : null;
+
+      setStartOdometerValue(Number.isFinite(odometerValue as number) ? (odometerValue as number) : null);
     };
     loadShift();
 

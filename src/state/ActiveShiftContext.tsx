@@ -8,10 +8,6 @@ export interface Shift {
   started_at: string | null;
   ended_at: string | null;
   status: 'pending' | 'active' | 'ended' | string;
-  start_odometer: number | null;
-  end_odometer: number | null;
-  start_odometer_photo_path: string | null;
-  end_odometer_photo_path: string | null;
 }
 
 export type ActiveShiftStatus = 'none' | 'loading' | 'active' | 'error';
