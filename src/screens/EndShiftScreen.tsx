@@ -24,6 +24,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
   } | null>(null);
   const [startOdometerValue, setStartOdometerValue] = useState<number | null>(null);
   const [shiftLoadError, setShiftLoadError] = useState<string | null>(null);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
@@ -98,41 +99,79 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     });
 
   const handleConfirm = async () => {
+    console.log('[EndShift] button pressed');
     if (isSubmitting) return;
 
+    setSubmitError(null);
+    console.log('[EndShift] validation started');
+
+    if (shiftLoadError) {
+      const message = `Shift load error: ${shiftLoadError}`;
+      console.warn('[EndShift] validation failed', { reason: message });
+      setSubmitError(message);
+      Alert.alert('Unable to end shift', message);
+      return;
+    }
+
     if (!endOdometerReading.trim()) {
+      const message = 'Please enter the final odometer reading.';
+      console.warn('[EndShift] validation failed', { reason: message });
+      setSubmitError(message);
       Alert.alert('Missing Information', 'Please enter the final odometer reading.');
       return;
     }
     const odometerValue = Number(endOdometerReading);
+    console.log('[EndShift] odometer value', { odometerValue });
     if (!Number.isInteger(odometerValue)) {
+      const message = 'Please enter a valid whole-number odometer reading.';
+      console.warn('[EndShift] validation failed', { reason: message, odometerValue });
+      setSubmitError(message);
       Alert.alert('Invalid Input', 'Please enter a valid whole-number odometer reading.');
       return;
     }
+    console.log('[EndShift] photo selected', { selected: Boolean(endOdometerPhoto) });
     if (!endOdometerPhoto) {
+      const message = 'Please take a photo of the final odometer reading.';
+      console.warn('[EndShift] validation failed', { reason: message });
+      setSubmitError(message);
       Alert.alert('Missing Information', 'Please take a photo of the final odometer reading.');
       return;
     }
     if (!endPhotoMeta) {
+      const message = 'Odometer photo metadata is missing. Please retake the photo.';
+      console.warn('[EndShift] validation failed', { reason: message });
+      setSubmitError(message);
       Alert.alert('Missing Information', 'Odometer photo metadata is missing. Please retake the photo.');
       return;
     }
     const endLocation = endPhotoMeta.location;
     if (endPhotoMeta.locationDenied || endLocation.lat === null || endLocation.lng === null) {
+      const message = 'Location is required for the final odometer photo. Please allow Location and try again.';
+      console.warn('[EndShift] validation failed', { reason: message, location: endLocation, locationDenied: endPhotoMeta.locationDenied });
+      setSubmitError(message);
       Alert.alert('Location required', 'Location is required for the final odometer photo. Please allow Location and try again.');
       return;
     }
     if (rubbishRemoved === null) {
+      const message = 'Please confirm whether rubbish has been removed.';
+      console.warn('[EndShift] validation failed', { reason: message });
+      setSubmitError(message);
       Alert.alert('Missing Information', 'Please confirm whether rubbish has been removed.');
       return;
     }
     if (!state.activeShiftId) {
+      const message = 'No active shift found.';
+      console.warn('[EndShift] validation failed', { reason: message });
+      setSubmitError(message);
       Alert.alert('Unable to end shift', 'No active shift found.');
       return;
     }
 
     const startValue = startOdometerValue ?? Number(state.odometerReading);
     if (odometerValue < startValue) {
+      const message = 'Final odometer must be greater than or equal to the start odometer.';
+      console.warn('[EndShift] validation failed', { reason: message, startValue, odometerValue });
+      setSubmitError(message);
       Alert.alert('Invalid Input', 'Final odometer must be greater than or equal to the start odometer.');
       return;
     }
@@ -160,11 +199,16 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
         { queueOnError: true }
       );
 
+      console.log('[EndShift] createEvent result', shiftEndResult);
+
       if (shiftEndResult.status === 'error') {
-        Alert.alert('Unable to end shift', shiftEndResult.error ?? 'Unable to end shift.');
+        const message = shiftEndResult.error ?? 'Unable to end shift.';
+        setSubmitError(message);
+        Alert.alert('Unable to end shift', message);
         return;
       }
 
+      console.log('[EndShift] endShift called');
       const ended = await endShift({
         endOdometerValue: odometerValue,
         endOdometerPhoto: endOdometerPhoto,
@@ -176,8 +220,12 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
         },
       });
 
+      console.log('[EndShift] endShift result', ended);
+
       if (!ended.ok) {
-        Alert.alert('Unable to end shift', ended.error ?? 'Unable to end shift.');
+        const message = ended.error ?? 'Unable to end shift.';
+        setSubmitError(message);
+        Alert.alert('Unable to end shift', message);
         return;
       }
 
@@ -192,7 +240,10 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       // Go back to vehicle assignment for next shift, not login
       navigation.reset({ index: 0, routes: [{ name: 'VehicleAssignment' }] });
     } catch (error) {
-      Alert.alert('Unable to end shift', error instanceof Error ? error.message : 'Unable to end shift.');
+      const message = error instanceof Error ? error.message : 'Unable to end shift.';
+      console.error('[EndShift] unexpected error', error);
+      setSubmitError(message);
+      Alert.alert('Unable to end shift', message);
     } finally {
       if (shouldReset) setIsSubmitting(false);
     }
@@ -267,8 +318,9 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       <Button
         label={isSubmitting ? 'Ending...' : 'Confirm end'}
         onPress={handleConfirm}
-        disabled={isSubmitting || Boolean(shiftLoadError)}
+        disabled={isSubmitting}
       />
+      {submitError ? <Text style={styles.errorText}>{submitError}</Text> : null}
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
     </ScreenContainer>
   );

@@ -12,12 +12,13 @@ export interface ActiveVehicleAssignmentRecord {
 
 export interface AssignedVehicleInfo {
   id: string;
-  registration: string | null;
   rego: string | null;
-  plate_number: string | null;
+  make: string | null;
+  model: string | null;
   type: string | null;
   depot: string | null;
-  depot_name?: string | null;
+  status?: string | null;
+  is_active?: boolean | null;
   assigned_driver_id?: string | null;
   assigned_at?: string | null;
   [key: string]: any;
@@ -28,9 +29,10 @@ export interface AssignedVehicleInfo {
  */
 export function getVehicleLabel(vehicle: AssignedVehicleInfo | null): string {
   if (!vehicle) return 'Unknown';
-  if (vehicle.registration) return vehicle.registration;
+  // Canonical vehicle display field from live schema.
   if (vehicle.rego) return vehicle.rego;
-  if (vehicle.plate_number) return vehicle.plate_number;
+  const makeModel = [vehicle.make, vehicle.model].filter(Boolean).join(' ');
+  if (makeModel) return makeModel;
   return `Vehicle ${vehicle.id.slice(0, 6)}`;
 }
 
@@ -83,7 +85,7 @@ async function fetchActiveAssignmentByDriverId(driverId: string): Promise<{
   if ((data as any)?.vehicle_id) {
     const { data: vehicleData, error: vehicleError } = await supabase
       .from('vehicles')
-      .select('id, rego, make, model, registration, plate_number, type, depot, depot_name')
+      .select('id, rego, make, model, status, is_active')
       .eq('id', (data as any).vehicle_id)
       .limit(1)
       .maybeSingle();
@@ -107,14 +109,13 @@ async function fetchActiveAssignmentByDriverId(driverId: string): Promise<{
     if (vehicleData) {
       vehicle = {
         id: vehicleData.id,
-        registration: vehicleData.registration ?? null,
         rego: vehicleData.rego ?? null,
-        plate_number: vehicleData.plate_number ?? null,
         make: vehicleData.make ?? null,
         model: vehicleData.model ?? null,
-        type: vehicleData.type ?? null,
-        depot: vehicleData.depot ?? vehicleData.depot_name ?? null,
-        depot_name: vehicleData.depot_name ?? null,
+        type: null,
+        depot: null,
+        status: vehicleData.status ?? null,
+        is_active: typeof vehicleData.is_active === 'boolean' ? vehicleData.is_active : null,
       } as AssignedVehicleInfo;
     }
   }

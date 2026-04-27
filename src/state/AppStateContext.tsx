@@ -1052,10 +1052,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       payload.endOdometerPhoto
     );
     if (photoError) {
+      console.error('[AppState.endShift] photo upload failed', {
+        shiftId: state.activeShiftId,
+        error: photoError,
+      });
       return { ok: false, error: `Failed to upload odometer photo: ${photoError}` };
     }
 
-    await supabase.from('shift_events').insert({
+    const { error: shiftEventError } = await supabase.from('shift_events').insert({
       shift_id: state.activeShiftId,
       event_type: 'shift_end',
       latitude: payload.location.lat,
@@ -1067,10 +1071,29 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       },
     });
 
+    if (shiftEventError) {
+      console.error('[AppState.endShift] shift_end event insert failed', {
+        shiftId: state.activeShiftId,
+        error: shiftEventError.message,
+      });
+      return { ok: false, error: `Failed to log shift end event: ${shiftEventError.message}` };
+    }
+
+    console.log('[AppState.endShift] shift_end event inserted', {
+      shiftId: state.activeShiftId,
+      odometerValue: payload.endOdometerValue,
+    });
+
     const { ok: rpcOk, error: rpcError } = await rpcEndShift({
       p_shift_id: state.activeShiftId,
       p_end_lat: payload.location.lat,
       p_end_lng: payload.location.lng,
+    });
+
+    console.log('[AppState.endShift] rpc end_shift result', {
+      shiftId: state.activeShiftId,
+      ok: rpcOk,
+      error: rpcError ?? null,
     });
 
     if (!rpcOk) {
