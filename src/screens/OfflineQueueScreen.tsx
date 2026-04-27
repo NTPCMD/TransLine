@@ -135,6 +135,18 @@ export default function OfflineQueueScreen() {
           <Text style={styles.retryCount}>Retries: {item.retryCount}</Text>
         )}
       </View>
+      {!!item.payload && (
+        <View style={styles.detailBox}>
+          <Text style={styles.detailLabel}>Payload</Text>
+          <Text style={styles.detailText}>{JSON.stringify(item.payload)}</Text>
+        </View>
+      )}
+      {!!item.lastError && (
+        <View style={styles.detailBox}>
+          <Text style={styles.detailLabel}>Last Error</Text>
+          <Text style={styles.errorText}>{item.lastError}</Text>
+        </View>
+      )}
     </View>
   );
 
@@ -289,6 +301,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#dc3545',
     fontWeight: '600',
+  },
+  detailBox: {
+    marginTop: 10,
+    backgroundColor: '#F8FAFC',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    borderRadius: 8,
+    padding: 8,
+  },
+  detailLabel: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#374151',
+    marginBottom: 4,
+  },
+  detailText: {
+    fontSize: 12,
+    color: '#111827',
+  },
+  errorText: {
+    fontSize: 12,
+    color: '#B91C1C',
   },
   emptyState: {
     alignItems: 'center',

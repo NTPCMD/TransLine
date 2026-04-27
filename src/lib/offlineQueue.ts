@@ -13,6 +13,7 @@ export interface QueuedEvent {
   payload: any;
   retryCount: number;
   status: 'pending' | 'syncing' | 'failed';
+  lastError?: string | null;
 }
 
 type QueueChangeCallback = (queue: QueuedEvent[]) => void;
@@ -26,6 +27,54 @@ class OfflineQueue {
 
   constructor() {
     this.initialize();
+  }
+
+  private formatSupabaseError(error: any): string {
+    if (!error) return 'Unknown Supabase error';
+    const message = typeof error.message === 'string' ? error.message : 'Unknown error';
+    const code = typeof error.code === 'string' ? error.code : 'n/a';
+    const details = typeof error.details === 'string' ? error.details : 'n/a';
+    const hint = typeof error.hint === 'string' ? error.hint : 'n/a';
+    return `${message} (code=${code}, details=${details}, hint=${hint})`;
+  }
+
+  private toShiftEventPayload(event: QueuedEvent): {
+    shift_id: string;
+    event_type: string;
+    latitude: number | null;
+    longitude: number | null;
+    metadata: Record<string, unknown>;
+  } | null {
+    const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+    const shiftIdRaw = (payload as any).shift_id;
+    const eventType = typeof event.eventType === 'string' ? event.eventType.trim() : '';
+
+    if (!eventType) {
+      return null;
+    }
+    if (typeof shiftIdRaw !== 'string' || !shiftIdRaw.trim()) {
+      return null;
+    }
+
+    const latRaw = (payload as any).latitude ?? (payload as any).lat ?? null;
+    const lngRaw = (payload as any).longitude ?? (payload as any).lng ?? null;
+
+    const latitude = typeof latRaw === 'number' && Number.isFinite(latRaw) ? latRaw : null;
+    const longitude = typeof lngRaw === 'number' && Number.isFinite(lngRaw) ? lngRaw : null;
+
+    const metadataRaw = (payload as any).metadata;
+    const metadata = metadataRaw && typeof metadataRaw === 'object' && !Array.isArray(metadataRaw)
+      ? metadataRaw as Record<string, unknown>
+      : {};
+
+    // Only valid shift_events columns are returned from this function.
+    return {
+      shift_id: shiftIdRaw.trim(),
+      event_type: eventType,
+      latitude,
+      longitude,
+      metadata,
+    };
   }
 
   private async initialize() {
@@ -74,6 +123,90 @@ class OfflineQueue {
   }
 
   /**
+   * Clean legacy queued payloads before sync.
+   * - Removes deprecated payload.timestamp from shift_event payloads.
+   * - Drops malformed queue entries that cannot be safely synced.
+   */
+  private sanitizeQueueForSync(): {
+    cleanedCount: number;
+    droppedCount: number;
+    repairedCount: number;
+  } {
+    let cleanedCount = 0;
+    let droppedCount = 0;
+    let repairedCount = 0;
+
+    const nextQueue: QueuedEvent[] = [];
+
+    for (const event of this.queue) {
+      // Drop malformed legacy queue items safely.
+      if (!event || typeof event !== 'object' || !event.id || !event.eventType) {
+        console.warn('[offlineQueue] Dropping malformed queue item (missing id/eventType)', {
+          event,
+        });
+        droppedCount += 1;
+        continue;
+      }
+
+      const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+      const {
+        timestamp: _legacyTimestamp,
+        event_type: _legacyEventType,
+        shift_id: shiftId,
+        lat,
+        lng,
+        latitude,
+        longitude,
+        metadata,
+      } = payload as Record<string, unknown>;
+
+      const normalizedPayload = {
+        shift_id: shiftId,
+        latitude: typeof latitude === 'number' ? latitude : (typeof lat === 'number' ? lat : null),
+        longitude: typeof longitude === 'number' ? longitude : (typeof lng === 'number' ? lng : null),
+        metadata: metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {},
+      };
+
+      let normalizedEvent: QueuedEvent = {
+        ...event,
+        payload: normalizedPayload,
+      };
+
+      if (event.status === 'failed') {
+        normalizedEvent = {
+          ...normalizedEvent,
+          status: 'pending',
+          retryCount: 0,
+        };
+        repairedCount += 1;
+      }
+
+      const shiftEventPayload = this.toShiftEventPayload(normalizedEvent);
+      if (!shiftEventPayload) {
+        console.warn('[offlineQueue] Dropping impossible malformed queue item (cannot map to shift_events columns)', {
+          eventType: event.eventType,
+          queueId: event.id,
+          payload: normalizedEvent.payload,
+        });
+        droppedCount += 1;
+        continue;
+      }
+
+      if (event.payload !== normalizedEvent.payload || event.status === 'failed') {
+        cleanedCount += 1;
+      }
+
+      nextQueue.push(normalizedEvent);
+    }
+
+    if (cleanedCount > 0 || droppedCount > 0) {
+      this.queue = nextQueue;
+    }
+
+    return { cleanedCount, droppedCount, repairedCount };
+  }
+
+  /**
    * Notify all subscribers of queue changes
    */
   private notifySubscribers(): void {
@@ -116,12 +249,18 @@ class OfflineQueue {
       payload,
       retryCount: 0,
       status: 'pending',
+      lastError: null,
     };
 
     this.queue.push(event);
     await this.saveQueue();
     
-    console.log(`Added event to offline queue: ${eventType}`, event.id);
+    console.log('[offlineQueue] Added event to offline queue', {
+      queueId: event.id,
+      eventType,
+      shiftId: payload?.shift_id ?? null,
+      payload,
+    });
   }
 
   /**
@@ -138,6 +277,14 @@ class OfflineQueue {
       return;
     }
 
+    const { cleanedCount, droppedCount, repairedCount } = this.sanitizeQueueForSync();
+    if (cleanedCount > 0 || droppedCount > 0 || repairedCount > 0) {
+      console.log(
+        `[offlineQueue] Repair queue before sync: cleaned=${cleanedCount}, repaired_failed=${repairedCount}, dropped_malformed=${droppedCount}`
+      );
+      await this.saveQueue();
+    }
+
     // Check if online
     const isOnline = await networkMonitor.isOnline();
     if (!isOnline) {
@@ -151,36 +298,61 @@ class OfflineQueue {
     const remainingQueue: QueuedEvent[] = [];
 
     for (const event of this.queue) {
-      // Skip already failed events (max retries reached)
-      if (event.status === 'failed') {
-        remainingQueue.push(event);
-        continue;
-      }
-
       // Update status to syncing (in memory only, will save at end)
       event.status = 'syncing';
+      event.lastError = null;
       // Notify UI of status change
       this.notifySubscribers();
 
       try {
-        const shiftEventPayload = {
-          shift_id: event.payload.shift_id || null,
-          event_type: event.eventType,
-          latitude: event.payload.lat || event.payload.latitude || null,
-          longitude: event.payload.lng || event.payload.longitude || null,
-          metadata: event.payload.metadata || {},
-        };
+        const shiftEventPayload = this.toShiftEventPayload(event);
+        if (!shiftEventPayload) {
+          console.warn('[offlineQueue] Dropping impossible malformed queued event before insert', {
+            queueId: event.id,
+            eventType: event.eventType,
+            payload: event.payload,
+          });
+          continue;
+        }
+
+        console.log('[offlineQueue] Syncing queued shift_event', {
+          queueId: event.id,
+          eventType: event.eventType,
+          shiftId: shiftEventPayload.shift_id,
+          payload: shiftEventPayload,
+        });
 
         const { error } = await supabase.from('shift_events').insert(shiftEventPayload);
 
         if (error) {
+          const formattedError = this.formatSupabaseError(error);
+          event.lastError = formattedError;
+          console.error('[offlineQueue] Failed to sync queued shift_event', {
+            queueId: event.id,
+            eventType: event.eventType,
+            shiftId: shiftEventPayload.shift_id,
+            payload: shiftEventPayload,
+            supabaseError: formattedError,
+          });
           throw error;
         }
 
         // Success - remove from queue
-        console.log(`Successfully synced event: ${event.eventType}`, event.id);
+        console.log('[offlineQueue] Successfully synced queued shift_event', {
+          queueId: event.id,
+          eventType: event.eventType,
+          shiftId: shiftEventPayload.shift_id,
+          payload: shiftEventPayload,
+        });
       } catch (error: any) {
-        console.error(`Failed to sync event: ${event.eventType}`, error.message);
+        const formattedError = this.formatSupabaseError(error);
+        console.error('[offlineQueue] Failed to sync event', {
+          queueId: event.id,
+          eventType: event.eventType,
+          shiftId: event?.payload?.shift_id ?? null,
+          payload: event?.payload ?? null,
+          supabaseError: formattedError,
+        });
         
         // Increment retry count
         event.retryCount += 1;
@@ -188,7 +360,14 @@ class OfflineQueue {
         // Mark as failed if max retries reached
         if (event.retryCount >= MAX_RETRY_ATTEMPTS) {
           event.status = 'failed';
-          console.log(`Event failed after ${MAX_RETRY_ATTEMPTS} retries: ${event.eventType}`, event.id);
+          console.warn('[offlineQueue] Event failed after max retries', {
+            queueId: event.id,
+            eventType: event.eventType,
+            shiftId: event?.payload?.shift_id ?? null,
+            retries: event.retryCount,
+            maxRetries: MAX_RETRY_ATTEMPTS,
+            lastError: event.lastError ?? formattedError,
+          });
         } else {
           event.status = 'pending';
         }
