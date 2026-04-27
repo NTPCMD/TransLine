@@ -6,12 +6,14 @@ import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ScreenContainer from '../components/ScreenContainer';
 import { supabase } from '../lib/supabase';
 import { useDriver } from '../state/DriverContext';
+import { useAppState } from '../state/AppStateContext';
 import { useShiftLifecycle } from '../hooks/useShiftLifecycle';
 import type { ScreenProps } from '../types/navigation';
 
 export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
   const { navigation } = props;
   const { currentDriver, currentProfile, loading, reload } = useDriver();
+  const { clearSessionState } = useAppState();
   const {
     appState,
     assignedVehicle,
@@ -47,8 +49,13 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
   };
 
   const handleSignOut = async () => {
+    console.log('[Logout] pressed');
+    await clearSessionState();
+    console.log('[Logout] state cleared');
     await supabase.auth.signOut();
-    navigation.replace('Login');
+    console.log('[Logout] signed out');
+    console.log('[Navigation] route after logout', { route: 'Login' });
+    navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
   };
 
   const handleStartShift = () => {
@@ -82,7 +89,7 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
         <Text style={styles.secondaryText}>
           State: {isShiftActive ? 'On shift' : 'Ready to start'}
         </Text>
-        {appState.shiftStartTime ? (
+        {isShiftActive && appState.shiftStartTime ? (
           <Text style={styles.secondaryText}>
             Started: {new Date(appState.shiftStartTime).toLocaleString()}
           </Text>

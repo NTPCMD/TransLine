@@ -5,11 +5,13 @@ import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { supabase } from '../lib/supabase';
 import { useActiveAssignment } from '../state/AssignmentContext';
+import { useAppState } from '../state/AppStateContext';
 import type { ScreenProps } from '../types/navigation';
 
 export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssignment'>) {
   const { navigation } = props;
   const { status, vehicle, error, refresh } = useActiveAssignment();
+  const { state, clearSessionState, updateAppState } = useAppState();
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isConfirmed, setIsConfirmed] = useState(false);
 
@@ -43,7 +45,17 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
       setErrorMessage('Vehicle not assigned. Please contact admin.');
       return;
     }
+    updateAppState({ postShiftComplete: false });
     navigation.navigate('PreStartChecklist', { vehicleId: vehicle.id });
+  };
+
+  const handleStartNewShift = () => {
+    if (!vehicle?.id) {
+      setErrorMessage('Vehicle not assigned. Please contact admin.');
+      return;
+    }
+    updateAppState({ postShiftComplete: false });
+    navigation.navigate('StartShift');
   };
 
   const vehicleLabel = vehicle?.rego
@@ -66,22 +78,39 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
         )}
       </View>
 
-      <Pressable
-        onPress={() => setIsConfirmed(prev => !prev)}
-        style={[styles.checkboxRow, (status !== 'assigned' || !vehicle) && styles.checkboxRowDisabled]}
-        disabled={status !== 'assigned' || !vehicle}
-      >
-        <View style={[styles.checkbox, isConfirmed && styles.checkboxChecked]}>
-          {isConfirmed ? <Text style={styles.checkboxMark}>✓</Text> : null}
+      {state.postShiftComplete ? (
+        <View style={styles.completeCard}>
+          <Text style={styles.completeTitle}>Shift complete</Text>
+          <Text style={styles.completeText}>You are now off shift. Start a new shift when you are ready.</Text>
         </View>
-        <Text style={styles.checkboxLabel}>I confirm this is the vehicle I'm inspecting</Text>
-      </Pressable>
+      ) : null}
 
-      <Button
-        label="Start Pre-Start Inspection"
-        onPress={handleStartChecklist}
-        disabled={status !== 'assigned' || !vehicle || !isConfirmed}
-      />
+      {state.postShiftComplete ? (
+        <Button
+          label="Start New Shift"
+          onPress={handleStartNewShift}
+          disabled={status !== 'assigned' || !vehicle}
+        />
+      ) : (
+        <>
+          <Pressable
+            onPress={() => setIsConfirmed(prev => !prev)}
+            style={[styles.checkboxRow, (status !== 'assigned' || !vehicle) && styles.checkboxRowDisabled]}
+            disabled={status !== 'assigned' || !vehicle}
+          >
+            <View style={[styles.checkbox, isConfirmed && styles.checkboxChecked]}>
+              {isConfirmed ? <Text style={styles.checkboxMark}>✓</Text> : null}
+            </View>
+            <Text style={styles.checkboxLabel}>I confirm this is the vehicle I'm inspecting</Text>
+          </Pressable>
+
+          <Button
+            label="Start Pre-Start Inspection"
+            onPress={handleStartChecklist}
+            disabled={status !== 'assigned' || !vehicle || !isConfirmed}
+          />
+        </>
+      )}
       <Button
         label="Refresh assignment"
         variant="ghost"
@@ -92,9 +121,14 @@ export default function VehicleAssignmentScreen(props: ScreenProps<'VehicleAssig
         label="Log out"
         variant="ghost"
         onPress={async () => {
+          console.log('[Logout] pressed');
+          await clearSessionState();
+          console.log('[Logout] state cleared');
           await supabase.auth.signOut();
+          console.log('[Logout] signed out');
           Alert.alert('Signed out', 'Please sign in again.');
-          navigation.replace('Login');
+          console.log('[Navigation] route after logout', { route: 'Login' });
+          navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
         }}
         disabled={status === 'loading'}
       />
@@ -158,5 +192,22 @@ const styles = StyleSheet.create({
     color: '#111827',
     fontWeight: '700',
     marginTop: 4,
+  },
+  completeCard: {
+    backgroundColor: '#ECFDF3',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#A7F3D0',
+    padding: 12,
+    marginTop: 12,
+    marginBottom: 8,
+    gap: 4,
+  },
+  completeTitle: {
+    color: '#065F46',
+    fontWeight: '700',
+  },
+  completeText: {
+    color: '#065F46',
   },
 });

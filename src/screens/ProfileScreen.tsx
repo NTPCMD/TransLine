@@ -20,7 +20,7 @@ import type { ScreenProps } from '../types/navigation';
 export default function ProfileScreen(props: ScreenProps<'Profile'>) {
   const { navigation } = props;
   const { currentDriver, authUserId } = useDriver();
-  const { state, updateAppState, resetShift } = useAppState();
+  const { state, updateAppState, clearSessionState } = useAppState();
   const [loading, setLoading] = useState(true);
   const [driverEmail, setDriverEmail] = useState<string>('');
   const [driverPhone, setDriverPhone] = useState<string>('');
@@ -145,14 +145,18 @@ export default function ProfileScreen(props: ScreenProps<'Profile'>) {
           style: 'destructive',
           onPress: async () => {
             try {
-              // Clear app state
-              resetShift();
-              
+              console.log('[Logout] pressed');
+              // Clear local app session state
+              await clearSessionState();
+              console.log('[Logout] state cleared');
+
               // Sign out from Supabase
               await supabase.auth.signOut();
-              
+              console.log('[Logout] signed out');
+
               // Navigate to login
-              navigation.replace('Login');
+              console.log('[Navigation] route after logout', { route: 'Login' });
+              navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
             } catch (error) {
               console.error('Logout failed:', error);
               Alert.alert('Error', 'Failed to logout. Please try again.');

@@ -1,16 +1,20 @@
 import { supabase } from './supabase';
 
 /**
- * Upload a shift odometer photo (pre or post) to the odometer-photos bucket.
- * Path: odometer-photos/shifts/{shiftId}/{type}-{timestamp}.jpg
+ * Upload a shift odometer photo (pre or post) to the odometer_photos bucket.
+ * Path: {userId}/{type}-{shiftId}-{timestamp}.jpg
  */
 export async function uploadShiftPhoto(
   shiftId: string,
   type: 'pre' | 'post',
-  photoUri: string
+  photoUri: string,
+  userId: string
 ): Promise<{ path: string; error?: string }> {
-  const storagePath = `shifts/${shiftId}/${type}-${Date.now()}.jpg`;
+  const filename = `${type}-${shiftId}-${Date.now()}.jpg`;
+  const storagePath = `${userId}/${filename}`;
+  const BUCKET = 'odometer_photos';
 
+  console.log('[photoUpload] preparing blob', { storagePath, BUCKET });
   let blob: Blob;
   try {
     if (photoUri.startsWith('data:')) {
@@ -36,14 +40,16 @@ export async function uploadShiftPhoto(
     return { path: '', error: `Failed to process photo URI: ${msg}` };
   }
 
+  console.log('[photoUpload] uploading to bucket', BUCKET, 'path', storagePath);
   const { error: uploadError } = await supabase.storage
-    .from('odometer-photos')
+    .from(BUCKET)
     .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: true });
 
   if (uploadError) {
-    console.error('[photoUpload] uploadShiftPhoto error:', uploadError.message);
+    console.error('[photoUpload] upload failed', { bucket: BUCKET, path: storagePath, error: uploadError.message });
     return { path: '', error: uploadError.message };
   }
 
+  console.log('[photoUpload] upload success', { bucket: BUCKET, path: storagePath });
   return { path: storagePath };
 }

@@ -195,10 +195,10 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
     }
 
     Alert.alert(
-      'Checklist submitted',
+      'Checklist saved',
       hasFail
-        ? 'Checklist submitted with issues. Operations will be notified.'
-        : 'Checklist saved successfully.'
+        ? 'Checklist saved locally with issues. You can continue to readings.'
+        : 'Checklist saved locally.'
     );
 
     if (hasCriticalFailures) {

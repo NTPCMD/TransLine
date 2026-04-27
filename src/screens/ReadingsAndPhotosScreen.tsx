@@ -83,12 +83,15 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
 
     setIsSaving(true);
     try {
+      console.log('[StartShift] calling startShift');
       const { shiftId, error, queued } = await startShift({
         odometerReading: reading,
         odometerPhoto: photoUri,
         capturedAt: gps.capturedAt,
         location: { lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy },
       });
+
+      console.log('[StartShift] returned shift id', { shiftId: shiftId ?? null, queued: queued ?? false });
 
       if (!shiftId) {
         throw new Error(error ?? 'Unable to start shift.');
@@ -98,8 +101,8 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
         setStartWarning('Odometer captured offline. It will sync when you are online.');
       }
 
-      updateAppState({ shiftStarted: true });
-      navigation.replace('Main');
+      console.log('[StartShift] navigating ActiveShift');
+      navigation.reset({ index: 0, routes: [{ name: 'ActiveShift' }] });
     } catch (e) {
       const message = e instanceof Error ? e.message : 'Unable to save odometer reading.';
       Alert.alert('Save failed', message, [{ text: 'OK' }]);

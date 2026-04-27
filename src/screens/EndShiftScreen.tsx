@@ -12,7 +12,7 @@ import type { ScreenProps } from '../types/navigation';
 
 export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
   const { navigation } = props;
-  const { closeActiveBreak, createEvent, endShift, state, resetShift, updateAppState } = useAppState();
+  const { closeActiveBreak, endShift, state, updateAppState } = useAppState();
   const [rubbishRemoved, setRubbishRemoved] = useState<'yes' | 'no' | null>(state.endShiftRubbishRemoved);
   const [endShiftNotes, setEndShiftNotes] = useState(state.endShiftNotes);
   const [endOdometerReading, setEndOdometerReading] = useState('');
@@ -86,24 +86,12 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     return endValue - startValue;
   };
 
-  const confirmDistance = async (distanceKm: number) =>
-    new Promise<boolean>((resolve) => {
-      Alert.alert(
-        'Confirm distance',
-        `Distance for this shift: ${distanceKm.toFixed(1)} km`,
-        [
-          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) },
-          { text: 'Confirm', onPress: () => resolve(true) },
-        ]
-      );
-    });
-
   const handleConfirm = async () => {
     console.log('[EndShift] button pressed');
     if (isSubmitting) return;
 
     setSubmitError(null);
-    console.log('[EndShift] validation started');
+    console.log('[EndShift] validating');
 
     if (shiftLoadError) {
       const message = `Shift load error: ${shiftLoadError}`;
@@ -159,13 +147,6 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       Alert.alert('Missing Information', 'Please confirm whether rubbish has been removed.');
       return;
     }
-    if (!state.activeShiftId) {
-      const message = 'No active shift found.';
-      console.warn('[EndShift] validation failed', { reason: message });
-      setSubmitError(message);
-      Alert.alert('Unable to end shift', 'No active shift found.');
-      return;
-    }
 
     const startValue = startOdometerValue ?? Number(state.odometerReading);
     if (odometerValue < startValue) {
@@ -177,38 +158,16 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     }
 
     const distanceKm = odometerValue - startValue;
-    const confirmed = await confirmDistance(distanceKm);
-    if (!confirmed) return;
+    console.log('[EndShift] validation passed');
 
     setIsSubmitting(true);
-    let shouldReset = true;
 
     try {
       if (state.isOnBreak) {
         await closeActiveBreak();
       }
 
-      const shiftEndResult = await createEvent(
-        'shift_end',
-        {
-          end_shift_notes: endShiftNotes,
-          end_odometer_value: odometerValue,
-          distance_km: distanceKm,
-          rubbish_removed: rubbishRemoved === 'yes',
-        },
-        { queueOnError: true }
-      );
-
-      console.log('[EndShift] createEvent result', shiftEndResult);
-
-      if (shiftEndResult.status === 'error') {
-        const message = shiftEndResult.error ?? 'Unable to end shift.';
-        setSubmitError(message);
-        Alert.alert('Unable to end shift', message);
-        return;
-      }
-
-      console.log('[EndShift] endShift called');
+      console.log('[EndShift] calling endShift');
       const ended = await endShift({
         endOdometerValue: odometerValue,
         endOdometerPhoto: endOdometerPhoto,
@@ -233,19 +192,21 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
         Alert.alert('Saved offline', 'End of shift details saved offline. They will sync when you are online.');
       }
 
-      resetShift();
       updateAppState({ isLoggedIn: true, declarationAccepted: true });
-      shouldReset = false;
 
-      // Go back to vehicle assignment for next shift, not login
-      navigation.reset({ index: 0, routes: [{ name: 'VehicleAssignment' }] });
+      // Must set isSubmitting false BEFORE navigation — the beforeRemove listener
+      // blocks navigation while isSubmitting is true.
+      setIsSubmitting(false);
+      console.log('[EndShift] navigating to dashboard');
+      navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
+      console.log('[EndShift] navigation complete');
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to end shift.';
       console.error('[EndShift] unexpected error', error);
       setSubmitError(message);
       Alert.alert('Unable to end shift', message);
     } finally {
-      if (shouldReset) setIsSubmitting(false);
+      setIsSubmitting(false);
     }
   };
 

@@ -17,8 +17,6 @@ export interface AssignedVehicleInfo {
   model: string | null;
   type: string | null;
   depot: string | null;
-  status?: string | null;
-  is_active?: boolean | null;
   assigned_driver_id?: string | null;
   assigned_at?: string | null;
   [key: string]: any;
@@ -85,7 +83,7 @@ async function fetchActiveAssignmentByDriverId(driverId: string): Promise<{
   if ((data as any)?.vehicle_id) {
     const { data: vehicleData, error: vehicleError } = await supabase
       .from('vehicles')
-      .select('id, rego, make, model, status, is_active')
+      .select('id, rego, make, model')
       .eq('id', (data as any).vehicle_id)
       .limit(1)
       .maybeSingle();
@@ -114,8 +112,6 @@ async function fetchActiveAssignmentByDriverId(driverId: string): Promise<{
         model: vehicleData.model ?? null,
         type: null,
         depot: null,
-        status: vehicleData.status ?? null,
-        is_active: typeof vehicleData.is_active === 'boolean' ? vehicleData.is_active : null,
       } as AssignedVehicleInfo;
     }
   }
