@@ -41,9 +41,7 @@ export function ActiveShiftProvider({ children, driverId }: { children: ReactNod
         .from('shifts')
         .select('*')
         .eq('driver_id', driverId)
-        .is('ended_at', null)
-        .order('started_at', { ascending: false })
-        .limit(1)
+        .eq('status', 'active')
         .maybeSingle();
 
       if (fetchError) {

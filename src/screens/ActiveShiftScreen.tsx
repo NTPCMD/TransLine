@@ -59,6 +59,7 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
     anchorLongitude: number;
     reported: boolean;
   } | null>(null);
+  const redirectHandledRef = useRef(false);
   const shiftIsActive = Boolean(state.activeShiftId);
   const assignmentVehicleId = assigned?.id ?? null;
   const resolvedVehicleObject = useMemo(
@@ -280,7 +281,6 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
     const activeShiftId = state.activeShiftId ?? null;
     console.log('[Tracking] activeShiftId', { activeShiftId });
     if (!activeShiftId) {
-      console.log('[Tracking] skipped: no active shift');
       stopPolling();
       return;
     }
@@ -314,6 +314,24 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
   }, [state.activeShiftId, state.activeShiftVehicleId, state.shiftStartTime]);
 
   useEffect(() => {
+    if (state.activeShiftId) {
+      redirectHandledRef.current = false;
+      return;
+    }
+
+    if (redirectHandledRef.current) {
+      return;
+    }
+
+    redirectHandledRef.current = true;
+    console.log('[ActiveShift] redirect skipped after endShift clear');
+    navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
+  }, [navigation, state.activeShiftId]);
+
+  useEffect(() => {
+    if (!state.activeShiftId) {
+      return;
+    }
     console.log('[ActiveShiftRender]', {
       activeShiftId: state.activeShiftId ?? null,
       shiftVehicleId,
@@ -390,6 +408,10 @@ export default function ActiveShiftScreen(props: ScreenProps<'ActiveShift'>) {
     const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
     return `${hours}h ${minutes}m`;
   };
+
+  if (!state.activeShiftId) {
+    return null;
+  }
 
   return (
     <ScreenContainer>

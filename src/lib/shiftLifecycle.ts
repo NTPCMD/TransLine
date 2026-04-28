@@ -18,60 +18,6 @@ export async function startShift(params: {
   const { data, error } = await supabase.rpc('start_shift', params);
   if (error) {
     console.error('[shiftLifecycle] start_shift RPC error:', error.message);
-
-    const normalized = error.message.toLowerCase();
-    if (normalized.includes('driver mismatch')) {
-      const candidateIds: string[] = [];
-
-      const { data: userData, error: userError } = await supabase.auth.getUser();
-      if (!userError) {
-        const authUserId = userData?.user?.id ?? null;
-        if (authUserId) {
-          candidateIds.push(authUserId);
-
-          const driverLookups = await Promise.all([
-            supabase.from('drivers').select('id').eq('user_id', authUserId).limit(1).maybeSingle(),
-            supabase.from('drivers').select('id').eq('profile_id', authUserId).limit(1).maybeSingle(),
-            supabase.from('drivers').select('id').eq('id', authUserId).limit(1).maybeSingle(),
-          ]);
-
-          for (const lookup of driverLookups) {
-            const id = lookup.data?.id ?? null;
-            if (id) {
-              candidateIds.push(id);
-            }
-          }
-        }
-      }
-
-      const dedupedCandidates = candidateIds.filter(
-        (value, index, arr) => Boolean(value) && arr.indexOf(value) === index && value !== params.p_driver_id
-      );
-
-      for (const candidateId of dedupedCandidates) {
-        console.log('[shiftLifecycle] retry start_shift with candidate driver id', {
-          previousDriverId: params.p_driver_id,
-          candidateDriverId: candidateId,
-        });
-
-        const retry = await supabase.rpc('start_shift', {
-          ...params,
-          p_driver_id: candidateId,
-        });
-
-        if (!retry.error && retry.data) {
-          return { shiftId: retry.data as string };
-        }
-
-        if (retry.error) {
-          console.warn('[shiftLifecycle] retry start_shift failed', {
-            candidateDriverId: candidateId,
-            message: retry.error.message,
-          });
-        }
-      }
-    }
-
     return { shiftId: null, error: error.message };
   }
   return { shiftId: data as string };

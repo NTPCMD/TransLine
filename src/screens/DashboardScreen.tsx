@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
@@ -13,7 +13,7 @@ import type { ScreenProps } from '../types/navigation';
 export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
   const { navigation } = props;
   const { currentDriver, currentProfile, loading, reload } = useDriver();
-  const { clearSessionState } = useAppState();
+  const { clearSessionState, updateAppState } = useAppState();
   const {
     appState,
     assignedVehicle,
@@ -64,8 +64,26 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
       return;
     }
 
+    updateAppState({ postShiftComplete: false });
     navigation.navigate('VehicleAssignment');
   };
+
+  useEffect(() => {
+    if (!isShiftActive && appState.postShiftComplete) {
+      console.log('[Routing] blocked auto-start after end shift', {
+        activeShiftId: appState.activeShiftId ?? null,
+        postShiftComplete: appState.postShiftComplete,
+      });
+    }
+  }, [appState.activeShiftId, appState.postShiftComplete, isShiftActive]);
+
+  useEffect(() => {
+    if (!isShiftActive) {
+      console.log('[Dashboard] ready to start, no active shift', {
+        activeShiftId: appState.activeShiftId ?? null,
+      });
+    }
+  }, [appState.activeShiftId, isShiftActive]);
 
   return (
     <ScreenContainer title="Driver Dashboard" subtitle="Connected to your live Supabase data">

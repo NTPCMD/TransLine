@@ -3,7 +3,8 @@ import { supabase } from './supabase';
 export interface DriverProfileRecord {
   id: string;
   user_id?: string | null;
-  auth_user_id?: string | null;
+  full_name?: string | null;
+  status?: string | null;
   profile_id?: string | null;
   name?: string | null;
   phone?: string | null;
@@ -33,16 +34,6 @@ const isExpectedNoRows = (message?: string | null): boolean => {
   return normalized.includes('0 rows') || normalized.includes('no rows');
 };
 
-const isMissingAuthUserIdColumn = (message?: string | null): boolean => {
-  const normalized = (message ?? '').toLowerCase();
-  return (
-    normalized.includes('auth_user_id') &&
-    (normalized.includes('does not exist') ||
-      normalized.includes('could not find the') ||
-      normalized.includes('column'))
-  );
-};
-
 export function getDriverDisplayName(
   driver: DriverProfileRecord | null,
   profile: UserProfileRecord | null
@@ -50,6 +41,11 @@ export function getDriverDisplayName(
   const driverName = typeof driver?.name === 'string' ? driver.name.trim() : '';
   if (driverName) {
     return driverName;
+  }
+
+  const driverFullName = typeof driver?.full_name === 'string' ? driver.full_name.trim() : '';
+  if (driverFullName) {
+    return driverFullName;
   }
 
   const fullName = typeof profile?.full_name === 'string' ? profile.full_name.trim() : '';
@@ -141,111 +137,26 @@ export async function fetchDriverContext(authUserId?: string | null): Promise<Dr
   console.log('[DriverSession] fetchDriverContext:lookup-driver', {
     authUserId: effectiveAuthUserId,
   });
-  let driverData: DriverProfileRecord | null = null;
+  const lookup = await supabase
+    .from('drivers')
+    .select('id, user_id, full_name, status')
+    .eq('user_id', effectiveAuthUserId)
+    .single();
 
-  const driverFromView = await supabase
-    .from('drivers_full')
-    .select('driver_id, auth_user_id')
-    .eq('auth_user_id', effectiveAuthUserId)
-    .maybeSingle();
-
-  if (driverFromView.error && !isExpectedNoRows(driverFromView.error.message)) {
-    if (isMissingAuthUserIdColumn(driverFromView.error.message)) {
-      console.warn('[DriverSession] drivers_full.auth_user_id unavailable, falling back to drivers table columns', {
-        authUserId: effectiveAuthUserId,
-        message: driverFromView.error.message,
-      });
-    } else {
-      console.error('[DriverSession] driver lookup via drivers_full failed', {
-        authUserId: effectiveAuthUserId,
-        message: driverFromView.error.message,
-      });
-      return {
-        authUserId: effectiveAuthUserId,
-        driver: null,
-        profile: null,
-        error: driverFromView.error.message,
-      };
-    }
-  }
-
-  if (driverFromView.data?.driver_id) {
-    const byDriverId = await supabase
-      .from('drivers')
-      .select('*')
-      .eq('id', driverFromView.data.driver_id)
-      .maybeSingle();
-
-    if (byDriverId.error && !isExpectedNoRows(byDriverId.error.message)) {
-      console.error('[DriverSession] driver lookup by id from drivers_full failed', {
-        authUserId: effectiveAuthUserId,
-        driverId: driverFromView.data.driver_id,
-        message: byDriverId.error.message,
-      });
-      return {
-        authUserId: effectiveAuthUserId,
-        driver: null,
-        profile: null,
-        error: byDriverId.error.message,
-      };
-    }
-
-    if (byDriverId.data) {
-      driverData = byDriverId.data as DriverProfileRecord;
-      console.log('[DriverSession] driver resolved via drivers_full.auth_user_id', {
-        authUserId: effectiveAuthUserId,
-        driverId: driverData.id,
-      });
-    }
-  }
-
-  const lookupColumns: Array<'user_id' | 'profile_id' | 'id'> = ['user_id', 'profile_id', 'id'];
-
-  for (const column of lookupColumns) {
-    if (driverData) {
-      break;
-    }
-
-    const lookup = await supabase
-      .from('drivers')
-      .select('*')
-      .eq(column, effectiveAuthUserId)
-      .maybeSingle();
-
-    if (lookup.error && !isExpectedNoRows(lookup.error.message)) {
-      console.error(`[DriverSession] driver lookup by ${column} failed`, {
-        authUserId: effectiveAuthUserId,
-        message: lookup.error.message,
-      });
-      return {
-        authUserId: effectiveAuthUserId,
-        driver: null,
-        profile: null,
-        error: lookup.error.message,
-      };
-    }
-
-    if (lookup.data) {
-      driverData = lookup.data as DriverProfileRecord;
-      console.log(`[DriverSession] driver resolved via ${column}`, {
-        authUserId: effectiveAuthUserId,
-        driverId: driverData.id,
-      });
-      break;
-    }
-  }
-
-  if (!driverData) {
-    console.warn('[DriverSession] driver not found for authenticated user', {
+  if (lookup.error) {
+    console.error('[DriverSession] driver lookup by user_id failed', {
       authUserId: effectiveAuthUserId,
+      message: lookup.error.message,
     });
     return {
       authUserId: effectiveAuthUserId,
       driver: null,
       profile: null,
-      error: 'Driver profile not found for this account.',
+      error: lookup.error.message,
     };
   }
+
+  const driverData = lookup.data as DriverProfileRecord;
 
   const profileLookup = await fetchProfileRecord(
     effectiveAuthUserId,

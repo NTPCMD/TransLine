@@ -175,6 +175,14 @@ export default function ProfileScreen(props: ScreenProps<'Profile'>) {
     navigation.navigate('OfflineQueue');
   };
 
+  const handleBackToDashboard = () => {
+    navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
+  };
+
+  const handleStartShift = () => {
+    navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
+  };
+
   const formatLastLogin = (timestamp: string) => {
     if (!timestamp) return 'Never';
     try {
@@ -336,6 +344,20 @@ export default function ProfileScreen(props: ScreenProps<'Profile'>) {
 
         {/* Account Actions */}
         <View style={styles.section}>
+          <Button
+            label={state.activeShiftId ? 'Back to Active Shift' : 'Back to Dashboard'}
+            variant="secondary"
+            onPress={handleBackToDashboard}
+            style={styles.actionButton}
+          />
+          {!state.activeShiftId ? (
+            <Button
+              label="Start Shift"
+              variant="secondary"
+              onPress={handleStartShift}
+              style={styles.actionButton}
+            />
+          ) : null}
           <Button
             label="Logout"
             variant="ghost"

@@ -16,8 +16,21 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isSigningIn, setIsSigningIn] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  const handleEmailChange = (value: string) => {
+    setEmail(value);
+    if (authError) setAuthError(null);
+  };
+
+  const handlePasswordChange = (value: string) => {
+    setPassword(value);
+    if (authError) setAuthError(null);
+  };
 
   const handleSignIn = async () => {
+    setAuthError(null);
+
     if (!email || !password) {
       Alert.alert('Missing details', 'Please provide both an email and password.');
       return;
@@ -39,9 +52,21 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
       });
 
       if (signInError) {
-        Alert.alert('Sign in failed', signInError.message);
+        const normalized = signInError.message.toLowerCase();
+        const message = normalized.includes('invalid login credentials')
+          ? 'Invalid email or password'
+          : 'Unable to sign in. Please try again.';
+        console.log('[Login] failed', {
+          code: signInError.code ?? null,
+          message: signInError.message,
+        });
+        setAuthError(message);
+        console.log('[Login] error shown to user', { message });
+        Alert.alert('Sign in failed', message);
         return;
       }
+
+      setAuthError(null);
 
       console.log('[Login] auth success', {
         authUserId: signInData?.user?.id ?? signInData?.session?.user?.id ?? null,
@@ -99,11 +124,9 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
 
       const { data: activeShiftData, error: activeShiftError } = await supabase
         .from('shifts')
-        .select('id, started_at, ended_at')
+        .select('*')
         .eq('driver_id', driverId)
-        .is('ended_at', null)
-        .order('started_at', { ascending: false })
-        .limit(1)
+        .eq('status', 'active')
         .maybeSingle();
 
       console.log('[Login] active shift lookup result', {
@@ -140,21 +163,20 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
         return;
       }
 
-      if (assignmentResult.vehicle?.id) {
-        console.log('[LoginRoute] auth success -> assignment/pre-shift route', {
-          vehicleId: assignmentResult.vehicle.id,
-        });
-        navigation.replace('VehicleAssignment');
-        return;
-      }
-
-      console.log('[LoginRoute] auth success -> no assignment blocked state route', {
+      console.log('[LoginRoute] auth success -> dashboard route', {
         driverId,
+        assignmentVehicleId: assignmentResult.vehicle?.id ?? null,
       });
-      navigation.replace('VehicleAssignment');
+      navigation.replace('Dashboard');
     } catch (error) {
       console.error('[Login] handleSignIn exception', error);
-      Alert.alert('Authentication error', error instanceof Error ? error.message : 'Unable to authenticate.');
+      const message = 'Unable to sign in. Please try again.';
+      console.log('[Login] failed', {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      setAuthError(message);
+      console.log('[Login] error shown to user', { message });
+      Alert.alert('Authentication error', message);
     } finally {
       setIsSigningIn(false);
     }
@@ -162,15 +184,16 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
 
   return (
     <ScreenContainer title="Driver Login" subtitle="Sign in to start your shift">
-      <TextField label="Email" value={email} onChangeText={setEmail} placeholder="Enter your work email" autoCapitalize="none" />
+      <TextField label="Email" value={email} onChangeText={handleEmailChange} placeholder="Enter your work email" autoCapitalize="none" />
       <TextField
         label="Password"
         value={password}
-        onChangeText={setPassword}
+        onChangeText={handlePasswordChange}
         placeholder="Enter your password"
         secureTextEntry
       />
       <Button label={isSigningIn ? 'Signing In...' : 'Sign In'} onPress={handleSignIn} disabled={isSigningIn} />
+      {authError ? <Text style={styles.errorText}>{authError}</Text> : null}
       <Text style={styles.helpText}>
         Driver accounts are provisioned by the TransLine admin portal. If access is missing, contact operations.
       </Text>
@@ -179,6 +202,10 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
 }
 
 const styles = StyleSheet.create({
+  errorText: {
+    color: '#D32F2F',
+    marginTop: 8,
+  },
   helpText: {
     color: '#6B7280',
     marginTop: 4,

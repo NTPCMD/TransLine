@@ -6,13 +6,13 @@ export function useShiftLifecycle() {
   const { state, startShift, endShift, createEvent, closeActiveBreak, refreshCurrentVehicle } = useAppState();
   const { status, vehicle, refresh } = useActiveAssignment();
   const { shift, status: activeShiftStatus, reload: reloadActiveShift } = useActiveShift();
-  const activeShiftId = state.activeShiftId;
+  const activeShiftId = shift?.id ?? null;
 
   return {
     activeShiftId,
     activeShift: shift,
-    // Active shift UI must only show when we have a concrete active shift id.
-    isShiftActive: Boolean(activeShiftId),
+    // DB-backed active shift only.
+    isShiftActive: Boolean(shift),
     assignmentStatus: status,
     assignedVehicle: vehicle,
     refreshAssignment: async (force = true) => {

@@ -57,12 +57,14 @@ export interface AppState {
   activeShiftVehicleId?: string | null;
   activeShiftVehicleResolutionError?: string | null;
   queuedEventsCount: number;
+  postShiftComplete: boolean;
 }
 
 interface AppStateContextValue {
   state: AppState;
   updateAppState: (updates: Partial<AppState>) => void;
   resetShift: () => void;
+  clearSessionState: () => Promise<void>;
   refreshCurrentVehicle: () => Promise<void>;
   submitPreStartChecklist: (payload: {
     answers: ChecklistAnswer[];
@@ -98,7 +100,6 @@ const AppStateContext = createContext<AppStateContextValue | undefined>(undefine
 
 const EVENT_QUEUE_KEY = 'transline:queuedEvents';
 const WRITE_QUEUE_KEY = 'transline:queuedWrites';
-const SHIFT_STATE_KEY = 'transline:shiftState';
 
 type EventQueueItem = {
   id: string;
@@ -113,16 +114,6 @@ type EventQueueItem = {
 
 const ALLOWED_RPC_NAMES = ['start_shift', 'end_shift', 'log_idle_event'] as const;
 type AllowedRpcName = typeof ALLOWED_RPC_NAMES[number];
-
-const isMissingAuthUserIdColumn = (message?: string | null): boolean => {
-  const normalized = (message ?? '').toLowerCase();
-  return (
-    normalized.includes('auth_user_id') &&
-    (normalized.includes('does not exist') ||
-      normalized.includes('could not find the') ||
-      normalized.includes('column'))
-  );
-};
 
 type RpcQueuedWrite = {
   id: string;
@@ -163,6 +154,7 @@ const initialState: AppState = {
   activeShiftVehicleId: null,
   activeShiftVehicleResolutionError: null,
   queuedEventsCount: 0,
+  postShiftComplete: false,
 };
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
@@ -178,6 +170,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       isLoggedIn: prev.isLoggedIn,
       declarationAccepted: prev.declarationAccepted,
       userId: prev.userId,
+      queuedEventsCount: prev.queuedEventsCount,
+    }));
+  };
+
+  const clearSessionState = async () => {
+    setState(prev => ({
+      ...initialState,
+      isLoggedIn: prev.isLoggedIn,
+      declarationAccepted: prev.declarationAccepted,
+      userId: prev.userId,
+      driverRecordId: prev.driverRecordId,
       queuedEventsCount: prev.queuedEventsCount,
     }));
   };
@@ -216,50 +219,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     });
     return () => unsubscribe();
   }, []);
-
-  useEffect(() => {
-    const restoreShiftState = async () => {
-      const stored = await AsyncStorage.getItem(SHIFT_STATE_KEY);
-      if (!stored) return;
-      try {
-        const parsed = JSON.parse(stored) as {
-          activeShiftId?: string | null;
-          shiftStartTime?: string | null;
-          odometerReading?: string;
-          shiftStarted?: boolean;
-        };
-        setState(prev => ({
-          ...prev,
-          activeShiftId: parsed.activeShiftId ?? prev.activeShiftId,
-          shiftStartTime: parsed.shiftStartTime ? new Date(parsed.shiftStartTime) : prev.shiftStartTime,
-          odometerReading: parsed.odometerReading ?? prev.odometerReading,
-          shiftStarted: parsed.shiftStarted ?? prev.shiftStarted,
-        }));
-      } catch (error) {
-        console.warn('Failed to restore shift state', error);
-      }
-    };
-    restoreShiftState();
-  }, []);
-
-  useEffect(() => {
-    const persistShiftState = async () => {
-      try {
-        await AsyncStorage.setItem(
-          SHIFT_STATE_KEY,
-          JSON.stringify({
-            activeShiftId: state.activeShiftId,
-            shiftStartTime: state.shiftStartTime ? state.shiftStartTime.toISOString() : null,
-            odometerReading: state.odometerReading,
-            shiftStarted: state.shiftStarted,
-          })
-        );
-      } catch (error) {
-        console.warn('Failed to persist shift state', error);
-      }
-    };
-    persistShiftState();
-  }, [state.activeShiftId, state.shiftStartTime, state.odometerReading, state.shiftStarted]);
 
   // Sync assignment context into app state
   useEffect(() => {
@@ -322,84 +281,27 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  // drivers.user_id = auth.users.id (your schema)
+  // Resolve only via drivers.user_id; no fallback IDs.
   const resolveDriverRecordId = async (authUserId: string | null) => {
     if (!authUserId) {
       return { driverRecordId: null as string | null, error: 'User not available.' };
     }
 
-    let driverRecordId: string | null = null;
+    const lookup = await supabase
+      .from('drivers')
+      .select('id, user_id, full_name, status')
+      .eq('user_id', authUserId)
+      .single();
 
-    const fromDriversFull = await supabase
-      .from('drivers_full')
-      .select('driver_id, auth_user_id')
-      .eq('auth_user_id', authUserId)
-      .maybeSingle();
-
-    if (fromDriversFull.error) {
-      const isNoRows = fromDriversFull.error.message.toLowerCase().includes('0 rows');
-      if (!isNoRows) {
-        if (isMissingAuthUserIdColumn(fromDriversFull.error.message)) {
-          console.warn('[DriverResolve] drivers_full.auth_user_id unavailable, using fallback lookup columns', {
-            authUserId,
-            message: fromDriversFull.error.message,
-          });
-        } else {
-          console.warn('[DriverResolve] Failed drivers_full lookup', {
-            authUserId,
-            lookupColumn: 'drivers_full.auth_user_id',
-            message: fromDriversFull.error.message,
-          });
-          return { driverRecordId: null as string | null, error: fromDriversFull.error.message };
-        }
-      }
-    }
-
-    if (fromDriversFull.data?.driver_id) {
-      driverRecordId = fromDriversFull.data.driver_id;
-      console.log('[DriverResolve] Resolved driver record via drivers_full', {
+    if (lookup.error) {
+      console.warn('[DriverResolve] Failed to resolve driver via user_id', {
         authUserId,
-        lookupColumn: 'drivers_full.auth_user_id',
-        driverRecordId,
+        message: lookup.error.message,
       });
+      return { driverRecordId: null as string | null, error: lookup.error.message };
     }
 
-    const lookupColumns: Array<'user_id' | 'profile_id' | 'id'> = ['user_id', 'profile_id', 'id'];
-
-    for (const column of lookupColumns) {
-      if (driverRecordId) {
-        break;
-      }
-
-      const lookup = await supabase
-        .from('drivers')
-        .select('id')
-        .eq(column, authUserId)
-        .maybeSingle();
-
-      if (lookup.error) {
-        const isNoRows = lookup.error.message.toLowerCase().includes('0 rows');
-        if (!isNoRows) {
-          console.warn('[DriverResolve] Failed to resolve driver record', {
-            authUserId,
-            lookupColumn: column,
-            message: lookup.error.message,
-          });
-          return { driverRecordId: null as string | null, error: lookup.error.message };
-        }
-      }
-
-      if (lookup.data?.id) {
-        driverRecordId = lookup.data.id;
-        console.log('[DriverResolve] Resolved driver record', {
-          authUserId,
-          lookupColumn: column,
-          driverRecordId,
-        });
-        break;
-      }
-    }
-
+    const driverRecordId = lookup.data?.id ?? null;
     if (!driverRecordId) {
       console.warn('[DriverResolve] No driver record found', { authUserId });
       return { driverRecordId: null as string | null, error: 'Driver profile not available.' };
@@ -638,12 +540,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId: null, error: driverResolution.error ?? 'Driver profile not available.' };
     }
 
-    const profileResolution = await resolveProfileId(resolvedUserId);
-    const profileId = profileResolution.profileId;
-    if (!profileId) {
-      return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
-    }
-
     const vehicleIdToUse = vehicleIdOverride ?? state.vehicleId;
     if (!vehicleIdToUse) {
       return { shiftId: null, error: 'No vehicle assigned. Refresh assignment to continue.' };
@@ -659,17 +555,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           .eq('id', state.activeShiftId)
           .maybeSingle();
         if (!error && data) {
-          return { shiftId: data.id, driverId: data.driver_id ?? profileId, shiftVehicleId: data.vehicle_id ?? vehicleIdToUse };
+          return { shiftId: data.id, driverId: data.driver_id ?? driverRecordId, shiftVehicleId: data.vehicle_id ?? vehicleIdToUse };
         }
       }
-      return { shiftId: state.activeShiftId, driverId: profileId, shiftVehicleId: vehicleIdToUse };
+      return { shiftId: state.activeShiftId, driverId: driverRecordId, shiftVehicleId: vehicleIdToUse };
     }
 
     // Look for existing active shift
     const { data: activeShift, error: activeShiftError } = await supabase
       .from('shifts')
       .select('id, vehicle_id, driver_id')
-      .eq('driver_id', profileId)
+      .eq('driver_id', driverRecordId)
       .is('ended_at', null)
       .order('started_at', { ascending: false })
       .limit(1)
@@ -683,7 +579,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       setState(prev => ({ ...prev, activeShiftId: activeShift.id }));
       return {
         shiftId: activeShift.id,
-        driverId: activeShift.driver_id ?? profileId,
+        driverId: activeShift.driver_id ?? driverRecordId,
         shiftVehicleId: activeShift.vehicle_id ?? vehicleIdToUse,
       };
     }
@@ -695,18 +591,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         type: 'rpc_call',
         name: 'start_shift',
         params: {
-          p_driver_id: profileId,
+          p_driver_id: driverRecordId,
           p_start_lat: startLat,
           p_start_lng: startLng,
           p_device_info: { platform: 'expo' },
         },
       });
       setState(prev => ({ ...prev, activeShiftId: localShiftId }));
-      return { shiftId: localShiftId, driverId: profileId, queued: true, shiftVehicleId: vehicleIdToUse };
+      return { shiftId: localShiftId, driverId: driverRecordId, queued: true, shiftVehicleId: vehicleIdToUse };
     }
 
     const { shiftId: newShiftId, error: rpcError } = await rpcStartShift({
-      p_driver_id: profileId,
+      p_driver_id: driverRecordId,
       p_start_lat: startLat,
       p_start_lng: startLng,
       p_device_info: { platform: 'expo' },
@@ -717,8 +613,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     setState(prev => ({ ...prev, activeShiftId: newShiftId }));
-    return { shiftId: newShiftId, driverId: profileId, shiftVehicleId: vehicleIdToUse };
-  }, [buildChecklistPayload, resolveDriverRecordId, resolveProfileId, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
+    return { shiftId: newShiftId, driverId: driverRecordId, shiftVehicleId: vehicleIdToUse };
+  }, [resolveDriverRecordId, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
 
   const submitPreStartChecklist = useCallback(
     async (payload: {
@@ -758,10 +654,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId: null, error: driverResolution.error ?? 'Driver profile not available.' };
     }
 
-    const profileResolution = await resolveProfileId(resolvedUserId);
-    const profileId = profileResolution.profileId;
-    if (!profileId) {
-      return { shiftId: null, error: profileResolution.error ?? 'Profile not available.' };
+    if (state.activeShiftId) {
+      return { shiftId: state.activeShiftId, error: 'Shift already active.' };
     }
 
     const { vehicle: assignmentVehicle, error: assignmentError } = await getAssignedVehicleForCurrentUser();
@@ -975,9 +869,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }, [
     buildChecklistPayload,
     ensureActiveShift,
-    resolveProfileId,
     resolveDriverRecordId,
     state.preStartChecklistAnswers,
+    state.activeShiftId,
     state.odometerReading,
     state.odometerPhoto,
     state.startOdometerCapturedAt,
@@ -999,18 +893,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     const resolvedUserId = await resolveAuthUserId();
     if (!resolvedUserId) return { ok: false, error: 'User not available.' };
 
+    const driverResolution = await resolveDriverRecordId(resolvedUserId);
+    const driverRecordId = driverResolution.driverRecordId;
+    if (!driverRecordId) {
+      return { ok: false, error: driverResolution.error ?? 'Driver profile not available.' };
+    }
+
     let activeShiftId = state.activeShiftId;
     if (!activeShiftId) {
-      const profileResolution = await resolveProfileId(resolvedUserId);
-      const profileId = profileResolution.profileId;
-      if (!profileId) {
-        return { ok: false, error: profileResolution.error ?? 'Profile not available.' };
-      }
-
       const { data: activeShift, error: activeShiftError } = await supabase
         .from('shifts')
         .select('id, vehicle_id, started_at')
-        .eq('driver_id', profileId)
+        .eq('driver_id', driverRecordId)
         .is('ended_at', null)
         .order('started_at', { ascending: false })
         .limit(1)
@@ -1050,31 +944,41 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         params: { p_shift_id: activeShiftId, p_end_lat: payload.location.lat, p_end_lng: payload.location.lng },
       });
 
-      await AsyncStorage.removeItem(SHIFT_STATE_KEY);
-      setState(prev => ({
-        ...prev,
-        activeShiftId: null,
-        activeShiftVehicleId: null,
-        activeShiftVehicleResolutionError: null,
-        shiftStartTime: null,
-        shiftStarted: false,
-        isOnBreak: false,
-        breakStartedAt: null,
-        breakAccumulatedSeconds: 0,
-        checklistSubmitted: false,
-        checklistCompleted: false,
-        preStartChecklistAnswers: [],
-        endShiftRubbishRemoved: null,
-        endShiftNotes: '',
-        shiftNotes: [],
-        odometerReading: '',
-        odometerPhoto: '',
-        startOdometerCapturedAt: null,
-        startOdometerLat: null,
-        startOdometerLng: null,
-        startOdometerAccuracy: null,
-      }));
-      console.log('[EndShift] state cleared');
+      const queuedWrites = await loadWriteQueue();
+      const filteredWrites = queuedWrites.filter(
+        (item) => !(item.type === 'rpc_call' && item.name === 'start_shift')
+      );
+      await saveWriteQueue(filteredWrites);
+
+      console.log('[EndShift] clearing state');
+      setState(prev => {
+        const next = {
+          ...prev,
+          activeShiftId: null,
+          activeShiftVehicleId: null,
+          activeShiftVehicleResolutionError: null,
+          shiftStartTime: null,
+          shiftStarted: false,
+          isOnBreak: false,
+          breakStartedAt: null,
+          breakAccumulatedSeconds: 0,
+          checklistSubmitted: false,
+          checklistCompleted: false,
+          preStartChecklistAnswers: [],
+          endShiftRubbishRemoved: null,
+          endShiftNotes: '',
+          shiftNotes: [],
+          odometerReading: '',
+          odometerPhoto: '',
+          startOdometerCapturedAt: null,
+          startOdometerLat: null,
+          startOdometerLng: null,
+          startOdometerAccuracy: null,
+          postShiftComplete: true,
+        };
+        console.log('[EndShift] state after clear', { activeShiftId: next.activeShiftId, postShiftComplete: next.postShiftComplete });
+        return next;
+      });
       return { ok: true, queued: true };
     }
 
@@ -1137,33 +1041,43 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: rpcError ?? 'Failed to end shift.' };
     }
 
-    await AsyncStorage.removeItem(SHIFT_STATE_KEY);
-    setState(prev => ({
-      ...prev,
-      activeShiftId: null,
-      activeShiftVehicleId: null,
-      activeShiftVehicleResolutionError: null,
-      shiftStartTime: null,
-      shiftStarted: false,
-      isOnBreak: false,
-      breakStartedAt: null,
-      breakAccumulatedSeconds: 0,
-      checklistSubmitted: false,
-      checklistCompleted: false,
-      preStartChecklistAnswers: [],
-      endShiftRubbishRemoved: null,
-      endShiftNotes: '',
-      shiftNotes: [],
-      odometerReading: '',
-      odometerPhoto: '',
-      startOdometerCapturedAt: null,
-      startOdometerLat: null,
-      startOdometerLng: null,
-      startOdometerAccuracy: null,
-    }));
-    console.log('[EndShift] state cleared');
+    const queuedWrites = await loadWriteQueue();
+    const filteredWrites = queuedWrites.filter(
+      (item) => !(item.type === 'rpc_call' && item.name === 'start_shift')
+    );
+    await saveWriteQueue(filteredWrites);
+
+    console.log('[EndShift] clearing state');
+    setState(prev => {
+      const next = {
+        ...prev,
+        activeShiftId: null,
+        activeShiftVehicleId: null,
+        activeShiftVehicleResolutionError: null,
+        shiftStartTime: null,
+        shiftStarted: false,
+        isOnBreak: false,
+        breakStartedAt: null,
+        breakAccumulatedSeconds: 0,
+        checklistSubmitted: false,
+        checklistCompleted: false,
+        preStartChecklistAnswers: [],
+        endShiftRubbishRemoved: null,
+        endShiftNotes: '',
+        shiftNotes: [],
+        odometerReading: '',
+        odometerPhoto: '',
+        startOdometerCapturedAt: null,
+        startOdometerLat: null,
+        startOdometerLng: null,
+        startOdometerAccuracy: null,
+        postShiftComplete: true,
+      };
+      console.log('[EndShift] state after clear', { activeShiftId: next.activeShiftId, postShiftComplete: next.postShiftComplete });
+      return next;
+    });
     return { ok: true };
-  }, [state.activeShiftId, state.userId]);
+  }, [resolveDriverRecordId, state.activeShiftId, state.userId]);
 
   const closeActiveBreak = useCallback(
     async (options?: { queueOnError?: boolean }) => {
@@ -1187,6 +1101,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         state,
         updateAppState,
         resetShift,
+        clearSessionState,
         refreshCurrentVehicle,
         submitPreStartChecklist,
         startShift,

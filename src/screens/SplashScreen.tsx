@@ -13,6 +13,18 @@ export default function SplashScreen(props: ScreenProps<'Splash'>) {
       if (userId) {
         const driverContext = await fetchDriverContext(userId);
         if (driverContext.driver) {
+          const { data: activeShift } = await supabase
+            .from('shifts')
+            .select('*')
+            .eq('driver_id', driverContext.driver.id)
+            .eq('status', 'active')
+            .maybeSingle();
+
+          if (activeShift) {
+            navigation.replace('ActiveShift');
+            return;
+          }
+
           navigation.replace('Dashboard');
           return;
         }

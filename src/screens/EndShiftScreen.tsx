@@ -7,12 +7,16 @@ import Button from '../components/Button';
 import TextField from '../components/TextField';
 import PhotoPicker from '../components/PhotoPicker';
 import { useAppState } from '../state/AppStateContext';
+import { useDriver } from '../state/DriverContext';
+import { useActiveShift } from '../state/ActiveShiftContext';
 import { supabase } from '../lib/supabase';
 import type { ScreenProps } from '../types/navigation';
 
 export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
   const { navigation } = props;
   const { closeActiveBreak, endShift, state, updateAppState } = useAppState();
+  const { reload: reloadDriverContext } = useDriver();
+  const { reload: reloadActiveShift } = useActiveShift();
   const [rubbishRemoved, setRubbishRemoved] = useState<'yes' | 'no' | null>(state.endShiftRubbishRemoved);
   const [endShiftNotes, setEndShiftNotes] = useState(state.endShiftNotes);
   const [endOdometerReading, setEndOdometerReading] = useState('');
@@ -161,6 +165,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     console.log('[EndShift] validation passed');
 
     setIsSubmitting(true);
+    let navigationRequested = false;
 
     try {
       if (state.isOnBreak) {
@@ -197,16 +202,21 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       // Must set isSubmitting false BEFORE navigation — the beforeRemove listener
       // blocks navigation while isSubmitting is true.
       setIsSubmitting(false);
-      console.log('[EndShift] navigating to dashboard');
+      navigationRequested = true;
+      console.log('[EndShift] reset navigation to dashboard');
       navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
       console.log('[EndShift] navigation complete');
+      void reloadActiveShift();
+      void reloadDriverContext();
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to end shift.';
       console.error('[EndShift] unexpected error', error);
       setSubmitError(message);
       Alert.alert('Unable to end shift', message);
     } finally {
-      setIsSubmitting(false);
+      if (!navigationRequested) {
+        setIsSubmitting(false);
+      }
     }
   };
 
