@@ -58,12 +58,20 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
   };
 
   const handleContinue = async () => {
+    console.log('[StartShift] continue pressed');
     setAttemptedSubmit(true);
     setStartError(null);
     setStartWarning(null);
 
-    if (isSaving) return;
-    if (!reading.trim() || !photoUri) return;
+    if (isSaving) {
+      setStartError('Shift start is already in progress.');
+      return;
+    }
+
+    if (!reading.trim() || !photoUri) {
+      setStartError('Enter the odometer reading and capture the odometer photo to continue.');
+      return;
+    }
 
     if (!vehicle) {
       setStartError('No active vehicle assignment. Refresh assignment to continue.');
@@ -79,6 +87,12 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
     const gps = await ensureStartOdometerGps();
     if (!gps) return;
 
+    console.log('[StartShift] validation passed', {
+      odometerValue,
+      hasPhoto: Boolean(photoUri),
+      vehicleId: vehicle.id,
+    });
+
     updateAppState({ odometerReading: reading, odometerPhoto: photoUri });
 
     setIsSaving(true);
@@ -91,7 +105,20 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
         location: { lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy },
       });
 
-      console.log('[StartShift] returned shift id', { shiftId: shiftId ?? null, queued: queued ?? false });
+      console.log('[StartShift] startShift result', {
+        shiftId: shiftId ?? null,
+        shiftIdType: typeof shiftId,
+        queued: queued ?? false,
+        error: error ?? null,
+      });
+
+      if (error) {
+        throw new Error(error);
+      }
+
+      if (typeof shiftId !== 'string' || shiftId.trim().length === 0) {
+        throw new Error('Start shift returned an invalid shift id.');
+      }
 
       if (!shiftId) {
         throw new Error(error ?? 'Unable to start shift.');

@@ -370,6 +370,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }, {});
   };
 
+  const normalizeShiftId = (value: unknown) => {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return value;
+    }
+
+    return null;
+  };
+
   const saveWriteQueue = async (queue: QueuedWrite[]) => {
     await AsyncStorage.setItem(WRITE_QUEUE_KEY, JSON.stringify(queue));
   };
@@ -483,13 +491,32 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         return { status: 'error' as const, error: 'Driver profile not available.' };
       }
 
-      console.log(`[Event] Creating event "${eventType}" with metadata`, { metadata, location });
+      let normalizedMetadata: Record<string, unknown> = metadata;
+      if (eventType === 'fuel_log') {
+        const receiptPhotoPath =
+          typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
+
+        if (!receiptPhotoPath || receiptPhotoPath.startsWith('data:')) {
+          return {
+            status: 'error' as const,
+            error: 'Fuel receipt upload failed. Please retry and ensure a valid receipt path is saved.',
+          };
+        }
+
+        const { receipt_urls: _ignoredReceiptUrls, ...rest } = metadata;
+        normalizedMetadata = {
+          ...rest,
+          receipt_photo_path: receiptPhotoPath,
+        };
+      }
+
+      console.log(`[Event] Creating event "${eventType}" with metadata`, { metadata: normalizedMetadata, location });
       const shiftEvent = {
         shift_id: activeShiftIdOverride || state.activeShiftId,
         event_type: eventType,
         latitude: location?.coords.latitude ?? null,
         longitude: location?.coords.longitude ?? null,
-        metadata,
+        metadata: normalizedMetadata,
       };
 
       const isOnline = await networkMonitor.isOnline();
@@ -500,7 +527,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             shift_id: activeShiftIdOverride || state.activeShiftId,
             latitude: location?.coords.latitude ?? null,
             longitude: location?.coords.longitude ?? null,
-            metadata,
+            metadata: normalizedMetadata,
           });
           return { status: 'queued' as const, error: 'Device is offline' };
         }
@@ -519,7 +546,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             shift_id: activeShiftIdOverride || state.activeShiftId,
             latitude: location?.coords.latitude ?? null,
             longitude: location?.coords.longitude ?? null,
-            metadata,
+            metadata: normalizedMetadata,
           });
           return { status: 'queued' as const, error: error.message };
         }
@@ -613,12 +640,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       p_device_info: { platform: 'expo' },
     });
 
-    if (rpcError || !newShiftId) {
+    const normalizedShiftId = normalizeShiftId(newShiftId);
+
+    if (rpcError || !normalizedShiftId) {
       return { shiftId: null, error: rpcError ?? 'Unable to create shift.' };
     }
 
-    setState(prev => ({ ...prev, activeShiftId: newShiftId }));
-    return { shiftId: newShiftId, driverId: driverRecordId, shiftVehicleId: vehicleIdToUse };
+    console.log('[StartShift] set activeShiftId', { shiftId: normalizedShiftId, source: 'ensureActiveShift' });
+    setState(prev => ({ ...prev, activeShiftId: normalizedShiftId }));
+    return { shiftId: normalizedShiftId, driverId: driverRecordId, shiftVehicleId: vehicleIdToUse };
   }, [resolveDriverRecordId, state.activeShiftId, state.driverRecordId, state.userId, state.vehicleId]);
 
   const submitPreStartChecklist = useCallback(
@@ -660,7 +690,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     }
 
     if (state.activeShiftId) {
-      return { shiftId: state.activeShiftId, error: 'Shift already active.' };
+      return { shiftId: state.activeShiftId };
     }
 
     const { vehicle: assignmentVehicle, error: assignmentError } = await getAssignedVehicleForCurrentUser();
@@ -726,6 +756,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       startLat,
       startLng
     );
+    shiftId = normalizeShiftId(shiftId);
     if (!shiftId || error) {
       return { shiftId: null, error };
     }
@@ -777,6 +808,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         startLat,
         startLng
       ));
+      shiftId = normalizeShiftId(shiftId);
       if (!shiftId || error) {
         return { shiftId: null, error: error ?? 'Unable to create shift.' };
       }
@@ -807,14 +839,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId, queued: true };
     }
 
-    console.log('[StartShift] returned shift id', { shiftId });
+    console.log('[StartShift] startShift result', { shiftId, queued: queued ?? false, driverId: driverId ?? null });
 
     const checklistPayload = buildChecklistPayload(state.preStartChecklistAnswers);
     if (!checklistPayload) {
       return { shiftId: null, error: 'Checklist payload is missing.' };
     }
 
-    console.log('[Checklist] saving to shifts.checklist', { shiftId });
+    console.log('[StartShift] saving checklist', { shiftId });
     const { error: checklistSaveError } = await supabase
       .from('shifts')
       .update({
@@ -824,20 +856,22 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       .eq('id', shiftId);
 
     if (checklistSaveError) {
-      console.error('[Checklist] save error', {
+      console.error('[StartShift] save checklist error', {
         shiftId,
         message: checklistSaveError.message,
       });
       return { shiftId: null, error: `Checklist save failed: ${checklistSaveError.message}` };
     }
-    console.log('[Checklist] save success', { shiftId });
+    console.log('[StartShift] save checklist success', { shiftId });
 
     // Upload pre-shift photo to the odometer_photos bucket
-    console.log('[photoUpload] startShift: uploading odometer photo', { shiftId, userId: resolvedUserId });
+    console.log('[StartShift] uploading odometer photo', { shiftId, userId: resolvedUserId });
     const { path: photoPath, error: photoError } = await uploadShiftPhoto(shiftId, 'pre', odometerPhoto, resolvedUserId);
     if (photoError) {
+      console.error('[StartShift] upload odometer error', { shiftId, message: photoError });
       return { shiftId: null, error: `Failed to upload odometer photo: ${photoError}` };
     }
+    console.log('[StartShift] upload odometer success', { shiftId, photoPath });
 
     // Log the shift start event with odometer metadata
     const { error: shiftStartEventError } = await supabase.from('shift_events').insert({
@@ -853,9 +887,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     });
 
     if (shiftStartEventError) {
+      console.error('[StartShift] shift_start event error', {
+        shiftId,
+        message: shiftStartEventError.message,
+      });
       return { shiftId: null, error: `Failed to save shift start event: ${shiftStartEventError.message}` };
     }
 
+    console.log('[StartShift] set activeShiftId', { shiftId, source: 'startShift' });
     setState(prev => ({
       ...prev,
       activeShiftId: shiftId,

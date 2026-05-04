@@ -1,5 +1,20 @@
 import { supabase } from './supabase';
 
+function coerceShiftId(data: unknown): string | null {
+  if (typeof data === 'string' && data.trim().length > 0) {
+    return data;
+  }
+
+  if (data && typeof data === 'object') {
+    const maybeId = 'id' in data ? data.id : null;
+    if (typeof maybeId === 'string' && maybeId.trim().length > 0) {
+      return maybeId;
+    }
+  }
+
+  return null;
+}
+
 /**
  * Start a shift via RPC. Returns the new shift UUID.
  */
@@ -20,7 +35,14 @@ export async function startShift(params: {
     console.error('[shiftLifecycle] start_shift RPC error:', error.message);
     return { shiftId: null, error: error.message };
   }
-  return { shiftId: data as string };
+
+  const shiftId = coerceShiftId(data);
+  if (!shiftId) {
+    console.error('[shiftLifecycle] start_shift RPC returned invalid payload', { data });
+    return { shiftId: null, error: 'start_shift returned an invalid shift id.' };
+  }
+
+  return { shiftId };
 }
 
 /**

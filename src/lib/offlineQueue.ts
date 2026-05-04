@@ -67,13 +67,29 @@ class OfflineQueue {
       ? metadataRaw as Record<string, unknown>
       : {};
 
+    let normalizedMetadata: Record<string, unknown> = metadata;
+    if (eventType === 'fuel_log') {
+      const receiptPhotoPath =
+        typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
+
+      if (!receiptPhotoPath || receiptPhotoPath.startsWith('data:')) {
+        return null;
+      }
+
+      const { receipt_urls: _ignoredReceiptUrls, ...rest } = metadata;
+      normalizedMetadata = {
+        ...rest,
+        receipt_photo_path: receiptPhotoPath,
+      };
+    }
+
     // Only valid shift_events columns are returned from this function.
     return {
       shift_id: shiftIdRaw.trim(),
       event_type: eventType,
       latitude,
       longitude,
-      metadata,
+      metadata: normalizedMetadata,
     };
   }
 
