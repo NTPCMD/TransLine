@@ -87,7 +87,8 @@ interface AppStateContextValue {
   createEvent: (
     eventType: string,
     metadata?: Record<string, unknown>,
-    options?: { queueOnError?: boolean; locationOverride?: { latitude: number; longitude: number } }
+    options?: { queueOnError?: boolean; locationOverride?: { latitude: number; longitude: number } },
+    activeShiftIdOverride?: string | null
   ) => Promise<{ status: 'sent' | 'queued' | 'error'; error?: string }>;
   closeActiveBreak: (options?: { queueOnError?: boolean }) => Promise<{
     closed: boolean;
@@ -463,7 +464,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     async (
       eventType: string,
       metadata: Record<string, unknown> = {},
-      options?: { queueOnError?: boolean; locationOverride?: { latitude: number; longitude: number } }
+      options?: { queueOnError?: boolean; locationOverride?: { latitude: number; longitude: number } },
+      activeShiftIdOverride?: string | null
     ) => {
       const queueOnError = options?.queueOnError ?? true;
       const locationOverride = options?.locationOverride;
@@ -481,8 +483,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         return { status: 'error' as const, error: 'Driver profile not available.' };
       }
 
+      console.log(`[Event] Creating event "${eventType}" with metadata`, { metadata, location });
       const shiftEvent = {
-        shift_id: state.activeShiftId,
+        shift_id: activeShiftIdOverride || state.activeShiftId,
         event_type: eventType,
         latitude: location?.coords.latitude ?? null,
         longitude: location?.coords.longitude ?? null,
@@ -494,7 +497,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       if (!isOnline) {
         if (queueOnError) {
           await offlineQueue.addEvent(eventType, {
-            shift_id: state.activeShiftId,
+            shift_id: activeShiftIdOverride || state.activeShiftId,
             latitude: location?.coords.latitude ?? null,
             longitude: location?.coords.longitude ?? null,
             metadata,
@@ -506,12 +509,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
       await processEventQueue();
 
+      console.log(`[Event] Creating event "${eventType}"`, { shiftEvent });
       const { error } = await supabase.from('shift_events').insert(shiftEvent);
+      console.log(`[Event] Insert result for "${eventType}"`, { error });
       if (error) {
         console.error('Failed to create shift_event', { eventType, shiftId: state.activeShiftId, message: error.message });
         if (queueOnError) {
           await offlineQueue.addEvent(eventType, {
-            shift_id: state.activeShiftId,
+            shift_id: activeShiftIdOverride || state.activeShiftId,
             latitude: location?.coords.latitude ?? null,
             longitude: location?.coords.longitude ?? null,
             metadata,

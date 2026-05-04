@@ -1,13 +1,18 @@
 import { useActiveAssignment } from '../state/AssignmentContext';
 import { useActiveShift } from '../state/ActiveShiftContext';
 import { useAppState } from '../state/AppStateContext';
+import { useEffect, useState } from 'react';
 
 export function useShiftLifecycle() {
   const { state, startShift, endShift, createEvent, closeActiveBreak, refreshCurrentVehicle } = useAppState();
   const { status, vehicle, refresh } = useActiveAssignment();
-  const { shift, status: activeShiftStatus, reload: reloadActiveShift } = useActiveShift();
-  const activeShiftId = shift?.id ?? null;
+  const { shift, reload: reloadActiveShift } = useActiveShift();
+  const [activeShiftId, setActiveShiftId] = useState<string | null>(shift?.id || null);
 
+  useEffect(() => {
+    setActiveShiftId(activeShiftId);
+  }, [activeShiftId]);
+  
   return {
     activeShiftId,
     activeShift: shift,
