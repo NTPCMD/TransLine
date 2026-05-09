@@ -51,6 +51,7 @@
     "@babel/plugin-transform-nullish-coalescing-operator": "^7.27.1",
     "@babel/plugin-transform-optional-chaining": "^7.28.5",
     "@types/react": "~19.1.10",
+    "babel-plugin-react-compiler": "^19.0.0-beta-ebf51a3-20250411",
     "babel-preset-expo": "~54.0.9",
     "expo-module-scripts": "^4.1.10",
     "typescript": "~5.9.2"
