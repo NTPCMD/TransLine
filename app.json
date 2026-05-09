@@ -39,7 +39,8 @@
           "photosPermission": "TransLine needs access to your photos to select odometer images.",
           "cameraPermission": "TransLine needs camera access to capture odometer photos for shift documentation."
         }
-      ]
+      ],
+      "expo-system-ui"
     ],
     "notification": {
       "icon": "./assets/notification-icon.png",
@@ -96,8 +97,9 @@
       "SUPABASE_URL": "https://fjllbnhcyugxltiresjp.supabase.co",
       "SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqbGxibmhjeXVneGx0aXJlc2pwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5ODAyNzMsImV4cCI6MjA4NzU1NjI3M30.alLINSopMh0fhu-Ae0kUbczNXdTVlk-JtWMMEpgjeuI",
       "eas": {
-        "projectId": "e31119de-8260-4772-9009-3797a3a3e06a"
+        "projectId": "f2fb53e7-a81c-44f6-88ed-6651027ba157"
       }
-    }
+    },
+    "owner": "rwadjjj"
   }
 }

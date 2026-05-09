@@ -6,10 +6,12 @@ node_modules/
 .expo-shared/
 
 # iOS
+ios/
 ios/Pods/
 ios/build/
 
 # Android
+android/
 android/.gradle
 android/.idea
 android/app/build/
