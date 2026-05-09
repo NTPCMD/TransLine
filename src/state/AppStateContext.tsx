@@ -77,6 +77,8 @@ interface AppStateContextValue {
     odometerPhoto: string;
     capturedAt?: string;
     location?: { lat: number; lng: number; accuracy: number | null };
+    checklistAnswers?: ChecklistAnswer[];
+    sourceScreen?: string;
   }) => Promise<{ shiftId: string | null; error?: string; queued?: boolean }>;
   endShift: (payload: {
     endOdometerValue: number;
@@ -101,6 +103,18 @@ const AppStateContext = createContext<AppStateContextValue | undefined>(undefine
 
 const EVENT_QUEUE_KEY = 'transline:queuedEvents';
 const WRITE_QUEUE_KEY = 'transline:queuedWrites';
+const OFFLINE_QUEUED_MESSAGE = 'Saved offline. Will sync automatically.';
+const CRITICAL_EVENT_TYPES = new Set([
+  'fuel_log',
+  'driver_log',
+  'break_start',
+  'break_end',
+  'odometer_start',
+  'odometer_end',
+  'shift_start',
+  'shift_end',
+  'location',
+]);
 
 type EventQueueItem = {
   id: string;
@@ -124,6 +138,12 @@ type RpcQueuedWrite = {
 };
 
 type QueuedWrite = RpcQueuedWrite;
+
+type ShiftEventOdometerRow = {
+  id?: string;
+  created_at: string;
+  metadata: unknown;
+};
 
 const initialState: AppState = {
   isLoggedIn: false,
@@ -378,6 +398,76 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     return null;
   };
 
+  const parseOdometerKm = (metadata: unknown): number | null => {
+    if (!metadata || typeof metadata !== 'object') return null;
+    const record = metadata as Record<string, unknown>;
+    if (record.unit !== 'km') return null;
+
+    const rawValue = record.odometer_value;
+    const value =
+      typeof rawValue === 'number'
+        ? rawValue
+        : typeof rawValue === 'string'
+          ? Number(rawValue)
+          : NaN;
+
+    if (!Number.isFinite(value)) return null;
+    return value;
+  };
+
+  const getLatestVehicleOdometerKm = useCallback(async (vehicleId: string) => {
+    const eventTypes = ['odometer_start', 'odometer_end'];
+
+    const [metadataVehicleResult, shiftVehicleResult] = await Promise.all([
+      supabase
+        .from('shift_events')
+        .select('id, created_at, metadata')
+        .in('event_type', eventTypes)
+        .eq('metadata->>vehicle_id', vehicleId)
+        .order('created_at', { ascending: false })
+        .limit(20),
+      supabase
+        .from('shift_events')
+        .select('id, created_at, metadata, shifts!inner(vehicle_id)')
+        .in('event_type', eventTypes)
+        .eq('shifts.vehicle_id', vehicleId)
+        .order('created_at', { ascending: false })
+        .limit(20),
+    ]);
+
+    if (metadataVehicleResult.error) {
+      return { value: null as number | null, error: metadataVehicleResult.error.message };
+    }
+
+    if (shiftVehicleResult.error) {
+      return { value: null as number | null, error: shiftVehicleResult.error.message };
+    }
+
+    const rows = [
+      ...((metadataVehicleResult.data ?? []) as ShiftEventOdometerRow[]),
+      ...((shiftVehicleResult.data ?? []) as ShiftEventOdometerRow[]),
+    ];
+
+    const deduped = new Map<string, ShiftEventOdometerRow>();
+    for (const row of rows) {
+      const key = row.id ?? `${row.created_at}:${JSON.stringify(row.metadata)}`;
+      if (!deduped.has(key)) deduped.set(key, row);
+    }
+
+    const sorted = Array.from(deduped.values()).sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    );
+
+    for (const row of sorted) {
+      const parsed = parseOdometerKm(row.metadata);
+      if (parsed !== null) {
+        return { value: parsed, error: null as string | null };
+      }
+    }
+
+    return { value: null as number | null, error: null as string | null };
+  }, []);
+
   const saveWriteQueue = async (queue: QueuedWrite[]) => {
     await AsyncStorage.setItem(WRITE_QUEUE_KEY, JSON.stringify(queue));
   };
@@ -475,7 +565,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       options?: { queueOnError?: boolean; locationOverride?: { latitude: number; longitude: number } },
       activeShiftIdOverride?: string | null
     ) => {
-      const queueOnError = options?.queueOnError ?? true;
+      const requestedQueueOnError = options?.queueOnError ?? true;
+      const mustQueueOnError = requestedQueueOnError || CRITICAL_EVENT_TYPES.has(eventType);
       const locationOverride = options?.locationOverride;
       const location = locationOverride
         ? {
@@ -522,14 +613,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const isOnline = await networkMonitor.isOnline();
 
       if (!isOnline) {
-        if (queueOnError) {
+        if (mustQueueOnError) {
           await offlineQueue.addEvent(eventType, {
-            shift_id: activeShiftIdOverride || state.activeShiftId,
+            shift_id: activeShiftIdOverride || state.activeShiftId || '',
+            event_type: eventType,
             latitude: location?.coords.latitude ?? null,
             longitude: location?.coords.longitude ?? null,
             metadata: normalizedMetadata,
           });
-          return { status: 'queued' as const, error: 'Device is offline' };
+          return { status: 'queued' as const, error: OFFLINE_QUEUED_MESSAGE };
         }
         return { status: 'error' as const, error: 'Device is offline' };
       }
@@ -541,14 +633,15 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       console.log(`[Event] Insert result for "${eventType}"`, { error });
       if (error) {
         console.error('Failed to create shift_event', { eventType, shiftId: state.activeShiftId, message: error.message });
-        if (queueOnError) {
+        if (mustQueueOnError) {
           await offlineQueue.addEvent(eventType, {
-            shift_id: activeShiftIdOverride || state.activeShiftId,
+            shift_id: activeShiftIdOverride || state.activeShiftId || '',
+            event_type: eventType,
             latitude: location?.coords.latitude ?? null,
             longitude: location?.coords.longitude ?? null,
             metadata: normalizedMetadata,
           });
-          return { status: 'queued' as const, error: error.message };
+          return { status: 'queued' as const, error: OFFLINE_QUEUED_MESSAGE };
         }
         return { status: 'error' as const, error: error.message };
       }
@@ -561,7 +654,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const ensureActiveShift = useCallback(async (
     vehicleIdOverride?: string | null,
     startLat: number | null = null,
-    startLng: number | null = null
+    startLng: number | null = null,
+    checklistPayload?: Record<string, unknown> | null,
+    sourceScreen?: string
   ) => {
     const resolvedUserId = await resolveAuthUserId();
     if (!resolvedUserId) return { shiftId: null, error: 'User not available.' };
@@ -616,6 +711,12 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       };
     }
 
+    console.log('[StartShiftPath] source screen', { source: sourceScreen ?? 'unknown' });
+    console.log('[Checklist] checklistAnswers present', { present: checklistPayload ? 'yes' : 'no' });
+    if (!checklistPayload) {
+      return { shiftId: null, error: 'Checklist is required before starting shift.' };
+    }
+
     if (!isOnline) {
       const localShiftId = generateUuid();
       await queueWrite({
@@ -626,6 +727,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           p_driver_id: driverRecordId,
           p_start_lat: startLat,
           p_start_lng: startLng,
+          p_checklist: checklistPayload,
           p_device_info: { platform: 'expo' },
         },
       });
@@ -637,6 +739,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       p_driver_id: driverRecordId,
       p_start_lat: startLat,
       p_start_lng: startLng,
+      p_checklist: checklistPayload,
       p_device_info: { platform: 'expo' },
     });
 
@@ -679,6 +782,8 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     odometerPhoto: string;
     capturedAt?: string;
     location?: { lat: number; lng: number; accuracy: number | null };
+    checklistAnswers?: ChecklistAnswer[];
+    sourceScreen?: string;
   }) => {
     const resolvedUserId = await resolveAuthUserId();
     if (!resolvedUserId) return { shiftId: null, error: 'User not available.' };
@@ -701,12 +806,18 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     const odometerReading = payload?.odometerReading ?? state.odometerReading;
     const odometerPhoto = payload?.odometerPhoto ?? state.odometerPhoto;
+    const checklistAnswers = payload?.checklistAnswers ?? state.preStartChecklistAnswers;
+    const sourceScreen = payload?.sourceScreen ?? 'unknown';
 
-    if (payload?.odometerReading || payload?.odometerPhoto) {
+    console.log('[StartShiftPath] source screen', { source: sourceScreen });
+    console.log('[Checklist] checklistAnswers present', { present: checklistAnswers.length > 0 ? 'yes' : 'no' });
+
+    if (payload?.odometerReading || payload?.odometerPhoto || payload?.checklistAnswers) {
       setState(prev => ({
         ...prev,
         odometerReading: payload?.odometerReading ?? prev.odometerReading,
         odometerPhoto: payload?.odometerPhoto ?? prev.odometerPhoto,
+        preStartChecklistAnswers: payload?.checklistAnswers ?? prev.preStartChecklistAnswers,
       }));
     }
 
@@ -715,12 +826,35 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { shiftId: null, error: 'Odometer value must be a valid whole number.' };
     }
 
+    console.log('[OdometerValidation] vehicleId', { vehicleId: assignmentVehicleId });
+    console.log('[OdometerValidation] typedStart', { typedStart: odometerValue });
+    const latestVehicleOdometerResult = await getLatestVehicleOdometerKm(assignmentVehicleId);
+    if (latestVehicleOdometerResult.error) {
+      return { shiftId: null, error: `Unable to validate odometer history: ${latestVehicleOdometerResult.error}` };
+    }
+
+    const latestVehicleOdometer = latestVehicleOdometerResult.value;
+    console.log('[OdometerValidation] latestVehicleOdometer', { latestVehicleOdometer });
+    if (latestVehicleOdometer !== null && odometerValue < latestVehicleOdometer) {
+      const latestDisplay = Number.isInteger(latestVehicleOdometer)
+        ? `${latestVehicleOdometer}`
+        : latestVehicleOdometer.toFixed(1);
+      const message = `Odometer cannot be less than the vehicle's last recorded reading of ${latestDisplay} km.`;
+      console.warn('[OdometerValidation] blocked reason', { reason: message });
+      return { shiftId: null, error: message };
+    }
+
     if (!odometerPhoto) {
       return { shiftId: null, error: 'Odometer photo is required.' };
     }
 
-    if (!state.preStartChecklistAnswers.length) {
+    if (!checklistAnswers.length) {
       return { shiftId: null, error: 'Checklist is required before starting shift.' };
+    }
+
+    const checklistPayload = buildChecklistPayload(checklistAnswers);
+    if (!checklistPayload) {
+      return { shiftId: null, error: 'Checklist payload is missing.' };
     }
 
     let capturedAt = payload?.capturedAt ?? state.startOdometerCapturedAt ?? new Date().toISOString();
@@ -754,7 +888,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     let { shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(
       assignmentVehicleId,
       startLat,
-      startLng
+      startLng,
+      checklistPayload,
+      sourceScreen
     );
     shiftId = normalizeShiftId(shiftId);
     if (!shiftId || error) {
@@ -806,7 +942,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       ({ shiftId, error, queued, driverId, shiftVehicleId } = await ensureActiveShift(
         assignmentVehicleId,
         startLat,
-        startLng
+        startLng,
+        checklistPayload,
+        sourceScreen
       ));
       shiftId = normalizeShiftId(shiftId);
       if (!shiftId || error) {
@@ -816,37 +954,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     const isOnline = await networkMonitor.isOnline();
 
-    if (!isOnline) {
-      await offlineQueue.addEvent('shift_start', {
-        shift_id: shiftId,
-        latitude: startLat,
-        longitude: startLng,
-        metadata: { odometer_value: odometerValue },
-      });
-      setState(prev => ({
-        ...prev,
-        activeShiftId: shiftId,
-        activeShiftVehicleId: assignmentVehicleId,
-        activeShiftVehicleResolutionError: null,
-        shiftStartTime: prev.shiftStartTime ?? new Date(capturedAt),
-        shiftStarted: true,
-      }));
-      console.log('[Tracking] activeShiftId', {
-        activeShiftId: shiftId,
-        shiftStartTime: capturedAt,
-        activeShiftVehicleId: assignmentVehicleId,
-      });
-      return { shiftId, queued: true };
-    }
-
     console.log('[StartShift] startShift result', { shiftId, queued: queued ?? false, driverId: driverId ?? null });
 
-    const checklistPayload = buildChecklistPayload(state.preStartChecklistAnswers);
-    if (!checklistPayload) {
-      return { shiftId: null, error: 'Checklist payload is missing.' };
-    }
-
-    console.log('[StartShift] saving checklist', { shiftId });
+    console.log('[Checklist] saving to shifts.checklist');
+    console.log('[Checklist] shiftId', { shiftId });
+    console.log('[Checklist] payload', checklistPayload);
     const { error: checklistSaveError } = await supabase
       .from('shifts')
       .update({
@@ -856,42 +968,104 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       .eq('id', shiftId);
 
     if (checklistSaveError) {
-      console.error('[StartShift] save checklist error', {
+      console.error('[Checklist] error', {
         shiftId,
+        payload: checklistPayload,
         message: checklistSaveError.message,
       });
       return { shiftId: null, error: `Checklist save failed: ${checklistSaveError.message}` };
     }
-    console.log('[StartShift] save checklist success', { shiftId });
+
+    console.log('[Checklist] success', { shiftId });
+
+    let photoPath: string | null = null;
+    let odometerStartQueued = queued ?? false;
 
     // Upload pre-shift photo to the odometer_photos bucket
     console.log('[StartShift] uploading odometer photo', { shiftId, userId: resolvedUserId });
-    const { path: photoPath, error: photoError } = await uploadShiftPhoto(shiftId, 'pre', odometerPhoto, resolvedUserId);
-    if (photoError) {
-      console.error('[StartShift] upload odometer error', { shiftId, message: photoError });
-      return { shiftId: null, error: `Failed to upload odometer photo: ${photoError}` };
-    }
-    console.log('[StartShift] upload odometer success', { shiftId, photoPath });
-
-    // Log the shift start event with odometer metadata
-    const { error: shiftStartEventError } = await supabase.from('shift_events').insert({
-      shift_id: shiftId,
-      event_type: 'shift_start',
-      latitude: startLat,
-      longitude: startLng,
-      metadata: {
-        odometer_value: odometerValue,
-        photo_path: photoPath,
-        captured_at: capturedAt,
-      },
-    });
-
-    if (shiftStartEventError) {
-      console.error('[StartShift] shift_start event error', {
-        shiftId,
-        message: shiftStartEventError.message,
+    const { path: uploadedPhotoPath, error: photoError } = await uploadShiftPhoto(shiftId, 'pre', odometerPhoto, resolvedUserId);
+    if (photoError || !uploadedPhotoPath) {
+      console.error('[StartShift] upload odometer error', { shiftId, message: photoError ?? 'no path returned' });
+      await offlineQueue.addEvent('odometer_start', {
+        shift_id: shiftId,
+        event_type: 'odometer_start',
+        latitude: startLat,
+        longitude: startLng,
+        metadata: {
+          odometer_value: odometerValue,
+          unit: 'km',
+          photo_path: null,
+          local_photo_uri: odometerPhoto,
+          upload_error: photoError ?? 'upload failed',
+          captured_at: capturedAt,
+          driver_id: driverId,
+          vehicle_id: shiftVehicleId ?? assignmentVehicleId,
+          shift_id: shiftId,
+        },
       });
-      return { shiftId: null, error: `Failed to save shift start event: ${shiftStartEventError.message}` };
+      odometerStartQueued = true;
+    } else {
+      photoPath = uploadedPhotoPath;
+      console.log('[StartShift] upload odometer success', { shiftId, photoPath });
+
+      if (isOnline) {
+        const { error: shiftStartEventError } = await supabase.from('shift_events').insert({
+          shift_id: shiftId,
+          event_type: 'odometer_start',
+          latitude: startLat,
+          longitude: startLng,
+          metadata: {
+            odometer_value: odometerValue,
+            unit: 'km',
+            photo_path: photoPath,
+            captured_at: capturedAt,
+            driver_id: driverId,
+            vehicle_id: shiftVehicleId ?? assignmentVehicleId,
+            shift_id: shiftId,
+          },
+        });
+
+        if (shiftStartEventError) {
+          console.error('[StartShift] odometer_start event error', {
+            shiftId,
+            message: shiftStartEventError.message,
+          });
+          await offlineQueue.addEvent('odometer_start', {
+            shift_id: shiftId,
+            event_type: 'odometer_start',
+            latitude: startLat,
+            longitude: startLng,
+            metadata: {
+              odometer_value: odometerValue,
+              unit: 'km',
+              photo_path: photoPath,
+              captured_at: capturedAt,
+              driver_id: driverId,
+              vehicle_id: shiftVehicleId ?? assignmentVehicleId,
+              shift_id: shiftId,
+              insert_error: shiftStartEventError.message,
+            },
+          });
+          odometerStartQueued = true;
+        }
+      } else {
+        await offlineQueue.addEvent('odometer_start', {
+          shift_id: shiftId,
+          event_type: 'odometer_start',
+          latitude: startLat,
+          longitude: startLng,
+          metadata: {
+            odometer_value: odometerValue,
+            unit: 'km',
+            photo_path: photoPath,
+            captured_at: capturedAt,
+            driver_id: driverId,
+            vehicle_id: shiftVehicleId ?? assignmentVehicleId,
+            shift_id: shiftId,
+          },
+        });
+        odometerStartQueued = true;
+      }
     }
 
     console.log('[StartShift] set activeShiftId', { shiftId, source: 'startShift' });
@@ -909,10 +1083,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       activeShiftVehicleId: assignmentVehicleId,
     });
 
-    return { shiftId, queued };
+    return { shiftId, queued: odometerStartQueued };
   }, [
     buildChecklistPayload,
     ensureActiveShift,
+    getLatestVehicleOdometerKm,
     resolveDriverRecordId,
     state.preStartChecklistAnswers,
     state.activeShiftId,
@@ -980,110 +1155,119 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     const isOnline = await networkMonitor.isOnline();
 
-    if (!isOnline) {
-      await queueWrite({
-        id: `${Date.now()}-end-shift`,
-        type: 'rpc_call',
-        name: 'end_shift',
-        params: { p_shift_id: activeShiftId, p_end_lat: payload.location.lat, p_end_lng: payload.location.lng },
-      });
-
-      const queuedWrites = await loadWriteQueue();
-      const filteredWrites = queuedWrites.filter(
-        (item) => !(item.type === 'rpc_call' && item.name === 'start_shift')
-      );
-      await saveWriteQueue(filteredWrites);
-
-      console.log('[EndShift] clearing state');
-      setState(prev => {
-        const next = {
-          ...prev,
-          activeShiftId: null,
-          activeShiftVehicleId: null,
-          activeShiftVehicleResolutionError: null,
-          shiftStartTime: null,
-          shiftStarted: false,
-          isOnBreak: false,
-          breakStartedAt: null,
-          breakAccumulatedSeconds: 0,
-          checklistSubmitted: false,
-          checklistCompleted: false,
-          preStartChecklistAnswers: [],
-          endShiftRubbishRemoved: null,
-          endShiftNotes: '',
-          shiftNotes: [],
-          odometerReading: '',
-          odometerPhoto: '',
-          startOdometerCapturedAt: null,
-          startOdometerLat: null,
-          startOdometerLng: null,
-          startOdometerAccuracy: null,
-          postShiftComplete: true,
-        };
-        console.log('[EndShift] state after clear', { activeShiftId: next.activeShiftId, postShiftComplete: next.postShiftComplete });
-        return next;
-      });
-      return { ok: true, queued: true };
-    }
-
     // Upload post-shift photo to the odometer_photos bucket
     console.log('[photoUpload] endShift: uploading odometer photo', { shiftId: activeShiftId, userId: resolvedUserId });
-    const { path: photoPath, error: photoError } = await uploadShiftPhoto(
+    const { path: uploadedPhotoPath, error: photoError } = await uploadShiftPhoto(
       activeShiftId,
       'post',
       payload.endOdometerPhoto,
       resolvedUserId
     );
-    if (photoError) {
-      console.error('[EndShift] error', {
-        shiftId: activeShiftId,
-        error: photoError,
-      });
-      return { ok: false, error: `Failed to upload odometer photo: ${photoError}` };
-    }
 
-    const { error: shiftEventError } = await supabase.from('shift_events').insert({
+    const endShiftVehicleId = state.activeShiftVehicleId ?? state.vehicleId ?? null;
+    const odometerEndMetadata = {
+      odometer_value: payload.endOdometerValue,
+      unit: 'km',
+      photo_path: uploadedPhotoPath ?? null,
+      local_photo_uri: uploadedPhotoPath ? null : payload.endOdometerPhoto,
+      captured_at: payload.capturedAt,
+      driver_id: driverRecordId,
+      vehicle_id: endShiftVehicleId,
       shift_id: activeShiftId,
-      event_type: 'shift_end',
-      latitude: payload.location.lat,
-      longitude: payload.location.lng,
-      metadata: {
-        odometer_value: payload.endOdometerValue,
-        photo_path: photoPath,
-        captured_at: payload.capturedAt,
-      },
-    });
+      upload_error: photoError ?? null,
+    } as Record<string, unknown>;
 
-    if (shiftEventError) {
+    let queued = false;
+
+    if (photoError || !uploadedPhotoPath) {
       console.error('[EndShift] error', {
         shiftId: activeShiftId,
-        error: shiftEventError.message,
+        error: photoError ?? 'no path returned',
       });
-      return { ok: false, error: `Failed to log shift end event: ${shiftEventError.message}` };
+      await offlineQueue.addEvent('odometer_end', {
+        shift_id: activeShiftId,
+        event_type: 'odometer_end',
+        latitude: payload.location.lat,
+        longitude: payload.location.lng,
+        metadata: odometerEndMetadata,
+      });
+      queued = true;
+    } else if (!isOnline) {
+      await offlineQueue.addEvent('odometer_end', {
+        shift_id: activeShiftId,
+        event_type: 'odometer_end',
+        latitude: payload.location.lat,
+        longitude: payload.location.lng,
+        metadata: odometerEndMetadata,
+      });
+      queued = true;
+    } else {
+      const { error: shiftEventError } = await supabase.from('shift_events').insert({
+        shift_id: activeShiftId,
+        event_type: 'odometer_end',
+        latitude: payload.location.lat,
+        longitude: payload.location.lng,
+        metadata: odometerEndMetadata,
+      });
+
+      if (shiftEventError) {
+        console.error('[EndShift] error', {
+          shiftId: activeShiftId,
+          error: shiftEventError.message,
+        });
+        await offlineQueue.addEvent('odometer_end', {
+          shift_id: activeShiftId,
+          event_type: 'odometer_end',
+          latitude: payload.location.lat,
+          longitude: payload.location.lng,
+          metadata: {
+            ...odometerEndMetadata,
+            insert_error: shiftEventError.message,
+          },
+        });
+        queued = true;
+      }
     }
 
     console.log('[EndShift] success', {
       shiftId: activeShiftId,
-      step: 'shift_end_event_inserted',
+      step: 'odometer_end_event_inserted',
       odometerValue: payload.endOdometerValue,
     });
 
-    const { ok: rpcOk, error: rpcError } = await rpcEndShift({
-      p_shift_id: activeShiftId,
-      p_end_lat: payload.location.lat,
-      p_end_lng: payload.location.lng,
-    });
+    let rpcOk = false;
+    let rpcError: string | undefined;
+
+    if (isOnline) {
+      const rpcResult = await rpcEndShift({
+        p_shift_id: activeShiftId,
+        p_end_lat: payload.location.lat,
+        p_end_lng: payload.location.lng,
+      });
+      rpcOk = rpcResult.ok;
+      rpcError = rpcResult.error;
+    }
+
+    if (!isOnline || !rpcOk) {
+      await queueWrite({
+        id: `${Date.now()}-end-shift`,
+        type: 'rpc_call',
+        name: 'end_shift',
+        params: {
+          p_shift_id: activeShiftId,
+          p_end_lat: payload.location.lat,
+          p_end_lng: payload.location.lng,
+        },
+      });
+      queued = true;
+    }
 
     console.log('[EndShift] success OR error', {
       shiftId: activeShiftId,
       ok: rpcOk,
       error: rpcError ?? null,
+      queued,
     });
-
-    if (!rpcOk) {
-      console.error('Failed to end shift via RPC', { shiftId: activeShiftId, error: rpcError });
-      return { ok: false, error: rpcError ?? 'Failed to end shift.' };
-    }
 
     const queuedWrites = await loadWriteQueue();
     const filteredWrites = queuedWrites.filter(
@@ -1120,7 +1304,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       console.log('[EndShift] state after clear', { activeShiftId: next.activeShiftId, postShiftComplete: next.postShiftComplete });
       return next;
     });
-    return { ok: true };
+    return { ok: true, queued };
   }, [resolveDriverRecordId, state.activeShiftId, state.userId]);
 
   const closeActiveBreak = useCallback(

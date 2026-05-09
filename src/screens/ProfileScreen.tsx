@@ -24,7 +24,8 @@ export default function ProfileScreen(props: ScreenProps<'Profile'>) {
   const [loading, setLoading] = useState(true);
   const [driverEmail, setDriverEmail] = useState<string>('');
   const [driverPhone, setDriverPhone] = useState<string>('');
-  const [lastLogin, setLastLogin] = useState<string>('');
+  const [lastShiftAt, setLastShiftAt] = useState<string>('');
+  const [lastShiftStatus, setLastShiftStatus] = useState<string>('');
   const [showDebug, setShowDebug] = useState(false);
   
   // Settings state
@@ -67,13 +68,25 @@ export default function ProfileScreen(props: ScreenProps<'Profile'>) {
       if (currentDriver?.id) {
         const { data, error } = await supabase
           .from('drivers')
-          .select('phone, last_login')
+          .select('phone')
           .eq('id', currentDriver.id)
           .single();
 
         if (!error && data) {
           setDriverPhone(data.phone ?? '');
-          setLastLogin(data.last_login ?? '');
+        }
+
+        const { data: lastShift, error: lastShiftError } = await supabase
+          .from('shifts')
+          .select('started_at, ended_at, status')
+          .eq('driver_id', currentDriver.id)
+          .order('started_at', { ascending: false })
+          .limit(1)
+          .maybeSingle();
+
+        if (!lastShiftError && lastShift) {
+          setLastShiftAt(lastShift.ended_at ?? lastShift.started_at ?? '');
+          setLastShiftStatus(lastShift.status ?? '');
         }
       }
     } catch (error) {
@@ -183,10 +196,15 @@ export default function ProfileScreen(props: ScreenProps<'Profile'>) {
     navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
   };
 
-  const formatLastLogin = (timestamp: string) => {
+  const formatLastShift = (timestamp: string, status: string) => {
     if (!timestamp) return 'Never';
+
     try {
-      return new Date(timestamp).toLocaleString();
+      const formatted = new Date(timestamp).toLocaleString();
+      if (status && status.toLowerCase() === 'active') {
+        return `${formatted} (in progress)`;
+      }
+      return formatted;
     } catch {
       return 'Unknown';
     }
@@ -230,8 +248,8 @@ export default function ProfileScreen(props: ScreenProps<'Profile'>) {
               <Text style={[styles.infoValue, styles.statusActive]}>Active</Text>
             </View>
             <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>Last Login:</Text>
-              <Text style={styles.infoValue}>{formatLastLogin(lastLogin)}</Text>
+              <Text style={styles.infoLabel}>Last Shift:</Text>
+              <Text style={styles.infoValue}>{formatLastShift(lastShiftAt, lastShiftStatus)}</Text>
             </View>
           </InfoCard>
           {showDebug ? (

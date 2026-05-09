@@ -20,6 +20,7 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
   const [loading, setLoading] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const cameraRef = useRef<CameraView | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
@@ -43,7 +44,12 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
       }
 
       const result = fromCamera
-        ? await ImagePicker.launchCameraAsync({ quality: 0.6 })
+        ? await ImagePicker.launchCameraAsync({
+            quality: 0.6,
+            cameraType: cameraFacing === 'back'
+              ? ImagePicker.CameraType.back
+              : ImagePicker.CameraType.front,
+          })
         : await ImagePicker.launchImageLibraryAsync({ quality: 0.6 });
 
       if (!result.canceled) {
@@ -133,6 +139,10 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
     }
   };
 
+  const handleFlipCamera = () => {
+    setCameraFacing((current) => (current === 'back' ? 'front' : 'back'));
+  };
+
   return (
     <View style={styles.container}>
       {label ? <Text style={styles.label}>{label}</Text> : null}
@@ -162,7 +172,7 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
       )}
       <Modal visible={showCamera} animationType="slide">
         <View style={styles.cameraContainer}>
-          <CameraView ref={cameraRef} style={styles.cameraPreview} facing="back" />
+          <CameraView ref={cameraRef} style={styles.cameraPreview} facing={cameraFacing} />
           <View style={styles.cameraControls}>
             <TouchableOpacity
               onPress={() => setShowCamera(false)}
@@ -170,6 +180,13 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
               disabled={isCapturing}
             >
               <Text style={styles.cameraButtonText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={handleFlipCamera}
+              style={[styles.cameraButton, styles.flipButton]}
+              disabled={isCapturing}
+            >
+              <Text style={styles.cameraButtonText}>Flip</Text>
             </TouchableOpacity>
             <TouchableOpacity
               onPress={captureWithCamera}
@@ -259,6 +276,9 @@ const styles = StyleSheet.create({
   },
   captureButton: {
     backgroundColor: '#C62828',
+  },
+  flipButton: {
+    backgroundColor: '#2563EB',
   },
   cameraButtonText: {
     color: '#FFFFFF',

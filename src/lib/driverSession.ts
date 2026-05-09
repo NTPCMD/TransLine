@@ -141,7 +141,7 @@ export async function fetchDriverContext(authUserId?: string | null): Promise<Dr
     .from('drivers')
     .select('id, user_id, full_name, status')
     .eq('user_id', effectiveAuthUserId)
-    .single();
+    .maybeSingle();
 
   if (lookup.error) {
     console.error('[DriverSession] driver lookup by user_id failed', {
@@ -153,6 +153,134 @@ export async function fetchDriverContext(authUserId?: string | null): Promise<Dr
       driver: null,
       profile: null,
       error: lookup.error.message,
+    };
+  }
+
+  if (!lookup.data) {
+    console.warn('[DriverSession] driver lookup by user_id: no match, trying profile fallback', {
+      authUserId: effectiveAuthUserId,
+    });
+
+    // Fallback 1: find profile where auth_user_id matches, then find driver by profile_id
+    const profileByAuthId = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('auth_user_id', effectiveAuthUserId)
+      .maybeSingle();
+
+    // Fallback 2: profile.id may equal the auth UUID directly
+    const profileIds = Array.from(
+      new Set([profileByAuthId.data?.id, effectiveAuthUserId].filter(Boolean) as string[])
+    );
+
+    let fallbackDriver: DriverProfileRecord | null = null;
+    for (const pid of profileIds) {
+      const byProfileId = await supabase
+        .from('drivers')
+        .select('id, user_id, full_name, status, profile_id')
+        .eq('profile_id', pid)
+        .maybeSingle();
+      if (byProfileId.data) {
+        fallbackDriver = byProfileId.data as DriverProfileRecord;
+        console.log('[DriverSession] driver found via profile_id fallback', {
+          authUserId: effectiveAuthUserId,
+          profileId: pid,
+          driverId: fallbackDriver.id,
+        });
+        break;
+      }
+    }
+
+    if (!fallbackDriver) {
+      // Fallback 3: look up by email via auth user → profiles.email → drivers.email
+      console.warn('[DriverSession] profile_id fallbacks failed, trying email fallback', {
+        authUserId: effectiveAuthUserId,
+      });
+
+      const { data: authUserData } = await supabase.auth.getUser();
+      const authEmail = authUserData?.user?.email ?? null;
+
+      if (authEmail) {
+        // Try drivers table directly by email field
+        const byEmail = await supabase
+          .from('drivers')
+          .select('id, user_id, full_name, status, profile_id, email')
+          .eq('email', authEmail)
+          .maybeSingle();
+
+        if (byEmail.data) {
+          fallbackDriver = byEmail.data as DriverProfileRecord;
+          console.log('[DriverSession] driver found via email fallback', {
+            authUserId: effectiveAuthUserId,
+            email: authEmail,
+            driverId: fallbackDriver.id,
+          });
+        }
+
+        // Try profiles by email → driver by profile_id
+        if (!fallbackDriver) {
+          const profileByEmail = await supabase
+            .from('profiles')
+            .select('id')
+            .eq('email', authEmail)
+            .maybeSingle();
+
+          if (profileByEmail.data?.id) {
+            const byProfileEmail = await supabase
+              .from('drivers')
+              .select('id, user_id, full_name, status, profile_id')
+              .eq('profile_id', profileByEmail.data.id)
+              .maybeSingle();
+
+            if (byProfileEmail.data) {
+              fallbackDriver = byProfileEmail.data as DriverProfileRecord;
+              console.log('[DriverSession] driver found via profile email fallback', {
+                authUserId: effectiveAuthUserId,
+                email: authEmail,
+                profileId: profileByEmail.data.id,
+                driverId: fallbackDriver.id,
+              });
+            }
+          }
+        }
+      }
+    }
+
+    if (!fallbackDriver) {
+      console.error('[DriverSession] driver lookup exhausted — no driver record found', {
+        authUserId: effectiveAuthUserId,
+      });
+      return {
+        authUserId: effectiveAuthUserId,
+        driver: null,
+        profile: null,
+        error: 'No driver account found for this user. Please contact your administrator.',
+      };
+    }
+
+    // Continue with the fallback driver record
+    const profileLookupFallback = await fetchProfileRecord(
+      effectiveAuthUserId,
+      fallbackDriver.profile_id ?? null
+    );
+    const driverFallback: DriverProfileRecord = {
+      ...fallbackDriver,
+      name: getDriverDisplayName(fallbackDriver, profileLookupFallback.profile),
+      profile_id:
+        (fallbackDriver.profile_id as string | null | undefined) ??
+        profileLookupFallback.profile?.id ??
+        null,
+    };
+    console.log('[DriverSession] fetchDriverContext:success (fallback)', {
+      authUserId: effectiveAuthUserId,
+      driverId: driverFallback.id,
+      profileId: driverFallback.profile_id ?? null,
+    });
+    return {
+      authUserId: effectiveAuthUserId,
+      driver: driverFallback,
+      profile: profileLookupFallback.profile,
+      error: profileLookupFallback.error,
     };
   }
 

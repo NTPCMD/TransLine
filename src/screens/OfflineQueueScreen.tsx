@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
+import { formatPerthTime } from '../lib/formatPerthDateTime';
 import {
   View,
   Text,
   StyleSheet,
   FlatList,
-  TouchableOpacity,
   RefreshControl,
   Alert,
 } from 'react-native';
@@ -20,11 +20,13 @@ export default function OfflineQueueScreen() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
+  const [lastSyncError, setLastSyncError] = useState<string | null>(null);
 
   useEffect(() => {
     // Subscribe to queue changes
     const unsubscribeQueue = offlineQueue.subscribe((newQueue) => {
       setQueue(newQueue);
+      setLastSyncError(offlineQueue.getLastSyncError());
     });
 
     // Subscribe to network changes
@@ -32,9 +34,10 @@ export default function OfflineQueueScreen() {
       setIsOnline(online);
     });
 
-    // Auto-refresh every 2 seconds to show status updates
+    // Keep in sync with persisted queue state.
     const interval = setInterval(() => {
       setQueue(offlineQueue.getQueue());
+      setLastSyncError(offlineQueue.getLastSyncError());
     }, 2000);
 
     return () => {
@@ -52,7 +55,7 @@ export default function OfflineQueueScreen() {
 
     setIsSyncing(true);
     try {
-      await offlineQueue.syncQueue();
+      await offlineQueue.retryNow();
     } catch (error) {
       console.error('Sync error:', error);
       Alert.alert('Sync Error', 'Failed to sync events. Please try again.');
@@ -84,67 +87,27 @@ export default function OfflineQueueScreen() {
     );
   };
 
-  const getStatusColor = (status: QueuedEvent['status']) => {
-    switch (status) {
-      case 'pending':
-        return '#ffc107'; // Yellow
-      case 'syncing':
-        return '#007bff'; // Blue
-      case 'failed':
-        return '#dc3545'; // Red
-      default:
-        return '#6c757d'; // Gray
-    }
-  };
-
-  const getStatusIcon = (status: QueuedEvent['status']) => {
-    switch (status) {
-      case 'pending':
-        return '🟡';
-      case 'syncing':
-        return '🔵';
-      case 'failed':
-        return '🔴';
-      default:
-        return '⚪';
-    }
-  };
-
-  const formatTime = (timestamp: string) => {
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString('en-US', {
-      hour: 'numeric',
-      minute: '2-digit',
-      hour12: true,
-    });
-  };
+  const formatTime = formatPerthTime;
 
   const renderEventItem = ({ item }: { item: QueuedEvent }) => (
     <View style={styles.eventCard}>
       <View style={styles.eventHeader}>
-        <Text style={styles.eventType}>{item.eventType}</Text>
-        <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-          <Text style={styles.statusText}>
-            {getStatusIcon(item.status)} {item.status.toUpperCase()}
-          </Text>
-        </View>
+        <Text style={styles.eventType}>{item.payload.event_type}</Text>
       </View>
       <View style={styles.eventFooter}>
-        <Text style={styles.eventTime}>{formatTime(item.timestamp)}</Text>
-        {item.retryCount > 0 && (
-          <Text style={styles.retryCount}>Retries: {item.retryCount}</Text>
+        <Text style={styles.eventTime}>{formatTime(item.created_at)}</Text>
+        {item.retry_count > 0 && (
+          <Text style={styles.retryCount}>Retries: {item.retry_count}</Text>
         )}
       </View>
-      {!!item.payload && (
-        <View style={styles.detailBox}>
-          <Text style={styles.detailLabel}>Payload</Text>
-          <Text style={styles.detailText}>{JSON.stringify(item.payload)}</Text>
-        </View>
-      )}
-      {!!item.lastError && (
+      <View style={styles.detailBox}>
+        <Text style={styles.detailLabel}>Payload</Text>
+        <Text style={styles.detailText}>{JSON.stringify(item.payload)}</Text>
+      </View>
+      {!!item.last_error && (
         <View style={styles.detailBox}>
           <Text style={styles.detailLabel}>Last Error</Text>
-          <Text style={styles.errorText}>{item.lastError}</Text>
+          <Text style={styles.errorText}>{item.last_error}</Text>
         </View>
       )}
     </View>
@@ -172,6 +135,7 @@ export default function OfflineQueueScreen() {
               <Text style={styles.offlineText}>🔴 Currently Offline</Text>
             </View>
           )}
+          {lastSyncError ? <Text style={styles.lastErrorText}>Last sync error: {lastSyncError}</Text> : null}
         </View>
 
         <FlatList
@@ -191,9 +155,9 @@ export default function OfflineQueueScreen() {
 
         <View style={styles.buttonContainer}>
           <AppButton
-            label={isSyncing ? 'Syncing...' : 'Sync Now'}
+            label={isSyncing ? 'Retrying...' : 'Retry sync now'}
             onPress={handleSyncNow}
-            disabled={isSyncing || !isOnline || queue.length === 0}
+            disabled={isSyncing || queue.length === 0}
             variant="primary"
           />
           <AppButton
@@ -245,6 +209,12 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  lastErrorText: {
+    marginTop: 8,
+    fontSize: 12,
+    color: '#B91C1C',
+    fontWeight: '600',
+  },
   listContent: {
     padding: 16,
   },
@@ -277,16 +247,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#212529',
     flex: 1,
-  },
-  statusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: 'bold',
   },
   eventFooter: {
     flexDirection: 'row',

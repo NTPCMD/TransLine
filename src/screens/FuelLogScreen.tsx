@@ -274,9 +274,9 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
 
       updateAppState({ lastFueled: capturedAt });
       Alert.alert(
-        result.status === 'queued' ? 'Queued for sync' : 'Fuel logged',
+        result.status === 'queued' ? 'Saved offline' : 'Fuel logged',
         result.status === 'queued'
-          ? 'No connection — fuel log will sync when you are back online.'
+          ? 'Saved offline. Will sync automatically.'
           : 'Your fuel entry has been saved.',
       );
       navigation.goBack();

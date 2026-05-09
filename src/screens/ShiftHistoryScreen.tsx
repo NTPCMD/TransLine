@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { formatPerthDate, formatPerthTime } from '../lib/formatPerthDateTime';
 import {
   StyleSheet,
   Text,
@@ -88,30 +89,8 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
     navigation.navigate('Dashboard');
   };
 
-  const formatDate = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
-      });
-    } catch {
-      return 'Invalid date';
-    }
-  };
-
-  const formatTime = (dateString: string) => {
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return 'Invalid time';
-    }
-  };
+  const formatDate = formatPerthDate;
+  const formatTime = formatPerthTime;
 
   const calculateDuration = (startedAt: string, endedAt: string | null) => {
     if (!endedAt) return 'In Progress';
@@ -158,25 +137,29 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
     }
   };
 
+  // Returns "YYYY-MM-DD" in Perth time for any Date/ISO string.
+  const toPerthDateKey = (value: Date | string): string => {
+    const d = typeof value === 'string' ? new Date(value) : value;
+    return d.toLocaleDateString('en-CA', { timeZone: 'Australia/Perth' }); // "YYYY-MM-DD"
+  };
+
   const groupShiftsByDate = (shifts: Shift[]) => {
     const groups: { [key: string]: Shift[] } = {};
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
+    const todayKey = toPerthDateKey(new Date());
+    const yesterday = new Date(Date.now() - 86400000);
+    const yesterdayKey = toPerthDateKey(yesterday);
+    const weekAgo = new Date(Date.now() - 7 * 86400000);
+    const weekAgoKey = toPerthDateKey(weekAgo);
 
     shifts.forEach((shift) => {
-      const shiftDate = new Date(shift.started_at);
-      const shiftDay = new Date(shiftDate.getFullYear(), shiftDate.getMonth(), shiftDate.getDate());
+      const shiftDayKey = toPerthDateKey(shift.started_at);
 
       let groupKey: string;
-      if (shiftDay.getTime() === today.getTime()) {
+      if (shiftDayKey === todayKey) {
         groupKey = 'Today';
-      } else if (shiftDay.getTime() === yesterday.getTime()) {
+      } else if (shiftDayKey === yesterdayKey) {
         groupKey = 'Yesterday';
-      } else if (shiftDay >= weekAgo) {
+      } else if (shiftDayKey >= weekAgoKey) {
         groupKey = 'This Week';
       } else {
         groupKey = 'Older';

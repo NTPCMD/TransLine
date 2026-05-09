@@ -6,6 +6,7 @@ import InfoCard from '../components/InfoCard';
 import Button from '../components/Button';
 import { supabase } from '../lib/supabase';
 import { useAppState } from '../state/AppStateContext';
+import { useActiveShift } from '../state/ActiveShiftContext';
 import type { ScreenProps } from '../types/navigation';
 
 const MAX_BREAK_SECONDS = 30 * 60; // 30 minutes
@@ -18,14 +19,20 @@ type BreakEventRow = {
 
 export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
   const { navigation } = props;
-  const { createEvent, state } = useAppState();
+  const { createEvent } = useAppState();
+  const { shift: activeShift, status: activeShiftStatus, reload: reloadActiveShift } = useActiveShift();
   const [breakEvents, setBreakEvents] = useState<BreakEventRow[]>([]);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const [isProcessing, setIsProcessing] = useState(false);
+  const activeShiftLoading = activeShiftStatus === 'loading';
 
   const loadBreakEvents = useCallback(async () => {
-    if (!state.activeShiftId) {
+    if (activeShiftLoading) {
+      return;
+    }
+
+    if (!activeShift?.id) {
       setBreakEvents([]);
       return;
     }
@@ -35,13 +42,13 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
       const { data, error } = await supabase
         .from('shift_events')
         .select('event_type, created_at')
-        .eq('shift_id', state.activeShiftId)
+        .eq('shift_id', activeShift.id)
         .in('event_type', ['break_start', 'break_end'])
         .order('created_at', { ascending: true });
 
       if (error) {
         console.error('[BreakControl] Failed to load break events', {
-          shiftId: state.activeShiftId,
+          shiftId: activeShift.id,
           supabaseError: `${error.message} (code=${error.code ?? 'n/a'}, details=${error.details ?? 'n/a'}, hint=${error.hint ?? 'n/a'})`,
         });
         return;
@@ -51,7 +58,15 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
     } finally {
       setIsLoadingEvents(false);
     }
-  }, [state.activeShiftId]);
+  }, [activeShift?.id, activeShiftLoading]);
+
+  useEffect(() => {
+    console.log('[Break] activeShift', { shiftId: activeShift?.id ?? null });
+  }, [activeShift?.id]);
+
+  useEffect(() => {
+    console.log('[Break] activeShiftLoading', { activeShiftLoading });
+  }, [activeShiftLoading]);
 
   useEffect(() => {
     const id = setInterval(() => setNowMs(Date.now()), 1000);
@@ -59,15 +74,20 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
   }, []);
 
   useEffect(() => {
-    void loadBreakEvents();
-  }, [loadBreakEvents]);
+    void reloadActiveShift();
+  }, [reloadActiveShift]);
 
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
-      void loadBreakEvents();
+      void reloadActiveShift();
     });
     return unsubscribe;
-  }, [loadBreakEvents, navigation]);
+  }, [navigation, reloadActiveShift]);
+
+  useEffect(() => {
+    if (activeShiftLoading) return;
+    void loadBreakEvents();
+  }, [activeShift?.id, activeShiftLoading, loadBreakEvents]);
 
   const breakSummary = useMemo(() => {
     let totalSeconds = 0;
@@ -110,20 +130,25 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
   }, [breakEvents, nowMs]);
 
   const startBreak = async () => {
+    console.log('[Break] startBreak pressed');
     if (isProcessing) return;
-    if (!state.activeShiftId) {
+    if (!activeShift && !activeShiftLoading) {
       alert('Cannot start break without an active shift.');
       return;
     }
+    if (activeShiftLoading || !activeShift?.id) return;
     if (breakSummary.remainingSeconds <= 0) {
       alert('Maximum break time (30 minutes) already reached for this shift.');
       return;
     }
     setIsProcessing(true);
     try {
-      const result = await createEvent('break_start');
+      const result = await createEvent('break_start', {}, undefined, activeShift.id);
       if (result.status === 'sent' || result.status === 'queued') {
         await loadBreakEvents();
+        if (result.status === 'queued') {
+          alert('Saved offline. Will sync automatically.');
+        }
       } else {
         alert(result.error ?? 'Failed to persist break start event.');
       }
@@ -134,7 +159,7 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
 
   const endBreak = async () => {
     if (isProcessing) return;
-    if (!state.activeShiftId) {
+    if (!activeShift?.id) {
       alert('Cannot end break without an active shift.');
       return;
     }
@@ -147,9 +172,12 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
 
     setIsProcessing(true);
     try {
-      const result = await createEvent('break_end', { duration_seconds: totalSeconds });
+      const result = await createEvent('break_end', { duration_seconds: totalSeconds }, undefined, activeShift.id);
       if (result.status === 'sent' || result.status === 'queued') {
         await loadBreakEvents();
+        if (result.status === 'queued') {
+          alert('Saved offline. Will sync automatically.');
+        }
       } else {
         alert(result.error ?? 'Failed to persist break end event.');
         return;
@@ -181,7 +209,7 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
 
         {!breakSummary.isOnBreak && (
           <View style={styles.buttonGroup}>
-            <Button label="Start Break" onPress={startBreak} disabled={isProcessing || remainingSeconds <= 0} />
+            <Button label="Start Break" onPress={startBreak} disabled={isProcessing || activeShiftLoading || remainingSeconds <= 0} />
           </View>
         )}
 

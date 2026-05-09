@@ -6,11 +6,12 @@ import Button from '../components/Button';
 import PhotoPicker from '../components/PhotoPicker';
 import { useAppState } from '../state/AppStateContext';
 import { useActiveAssignment } from '../state/AssignmentContext';
+import { useActiveShift } from '../state/ActiveShiftContext';
 import { getGpsFix } from '../lib/locationEvents';
 import type { ScreenProps } from '../types/navigation';
 
 export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndPhotos'>) {
-  const { navigation } = props;
+  const { navigation, route } = props;
   const { state, startShift, updateAppState } = useAppState();
   const [reading, setReading] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -18,6 +19,8 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
   const [attemptedSubmit, setAttemptedSubmit] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [startWarning, setStartWarning] = useState<string | null>(null);
+  const { reload: reloadActiveShift } = useActiveShift();
+  const checklistAnswers = route.params?.checklistAnswers ?? state.preStartChecklistAnswers;
 
   const { status, vehicle, refresh } = useActiveAssignment();
 
@@ -58,6 +61,7 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
   };
 
   const handleContinue = async () => {
+    console.log('[StartShiftPath] source screen', { source: 'ReadingsAndPhotos' });
     console.log('[StartShift] continue pressed');
     setAttemptedSubmit(true);
     setStartError(null);
@@ -75,6 +79,13 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
 
     if (!vehicle) {
       setStartError('No active vehicle assignment. Refresh assignment to continue.');
+      return;
+    }
+
+    console.log('[Checklist] checklistAnswers present', { present: checklistAnswers.length > 0 ? 'yes' : 'no' });
+    if (!checklistAnswers.length) {
+      setStartError('Checklist is required before starting shift. Complete the checklist first.');
+      Alert.alert('Checklist required', 'Complete the checklist before starting the shift.');
       return;
     }
 
@@ -103,6 +114,8 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
         odometerPhoto: photoUri,
         capturedAt: gps.capturedAt,
         location: { lat: gps.lat, lng: gps.lng, accuracy: gps.accuracy },
+        checklistAnswers,
+        sourceScreen: 'ReadingsAndPhotos',
       });
 
       console.log('[StartShift] startShift result', {
@@ -126,6 +139,10 @@ export default function ReadingsAndPhotosScreen(props: ScreenProps<'ReadingsAndP
 
       if (queued) {
         setStartWarning('Odometer captured offline. It will sync when you are online.');
+      }
+
+      if (!queued) {
+        await reloadActiveShift();
       }
 
       console.log('[StartShift] navigating ActiveShift');

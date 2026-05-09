@@ -42,6 +42,7 @@ export default function OdometerCaptureScreen({
   const cameraRef = useRef<CameraView>(null);
   const [permission, requestPermission] = useCameraPermissions();
   const [isCapturing, setIsCapturing] = useState(false);
+  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [odometerValue, setOdometerValue] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [location, setLocation] = useState<Location.LocationObject | null>(null);
@@ -102,6 +103,10 @@ export default function OdometerCaptureScreen({
     } finally {
       setIsCapturing(false);
     }
+  };
+
+  const handleFlipCamera = () => {
+    setCameraFacing((current) => (current === 'back' ? 'front' : 'back'));
   };
 
   const handleSave = async () => {
@@ -241,7 +246,7 @@ export default function OdometerCaptureScreen({
         <CameraView
           ref={cameraRef}
           style={StyleSheet.absoluteFill}
-          facing="back"
+          facing={cameraFacing}
         />
 
         {isCapturing && (
@@ -258,6 +263,13 @@ export default function OdometerCaptureScreen({
       </View>
 
       <View style={styles.buttonGroup}>
+        <TouchableOpacity
+          style={styles.flipButton}
+          onPress={handleFlipCamera}
+          disabled={isCapturing}
+        >
+          <Text style={styles.flipButtonText}>Flip Camera</Text>
+        </TouchableOpacity>
         <TouchableOpacity
           style={[styles.captureButton, isCapturing && styles.capturingButton]}
           onPress={handleCapture}
@@ -323,6 +335,17 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     borderWidth: 4,
     borderColor: '#FFF',
+  },
+  flipButton: {
+    alignSelf: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    backgroundColor: '#2563EB',
+  },
+  flipButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
   capturingButton: {
     opacity: 0.6,

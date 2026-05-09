@@ -27,7 +27,6 @@ import ShiftDetailsScreen from './src/screens/ShiftDetailsScreen';
 import BreakControlScreen from './src/screens/BreakControlScreen';
 import FuelLogScreen from './src/screens/FuelLogScreen';
 import IncidentReportScreen from './src/screens/IncidentReportScreen';
-import SendNoteScreen from './src/screens/SendNoteScreen';
 import EndShiftScreen from './src/screens/EndShiftScreen';
 import MedicalAbsenceScreen from './src/screens/MedicalAbsenceScreen';
 import AnnouncementsScreen from './src/screens/AnnouncementsScreen';
@@ -50,7 +49,6 @@ function MainDrawer() {
       <Drawer.Screen name="ShiftDetails" component={ShiftDetailsScreen as any} />
       <Drawer.Screen name="FuelLog" component={FuelLogScreen as any} />
       <Drawer.Screen name="IncidentReport" component={IncidentReportScreen as any} />
-      <Drawer.Screen name="SendNote" component={SendNoteScreen as any} />
       <Drawer.Screen name="MedicalAbsence" component={MedicalAbsenceScreen as any} />
       <Drawer.Screen name="Announcements" component={AnnouncementsScreen as any} />
       <Drawer.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen as any} />
@@ -87,7 +85,6 @@ function RootNavigator() {
       <Stack.Screen name="BreakControl" component={BreakControlScreen as any} />
       <Stack.Screen name="FuelLog" component={FuelLogScreen as any} />
       <Stack.Screen name="IncidentReport" component={IncidentReportScreen as any} />
-      <Stack.Screen name="SendNote" component={SendNoteScreen as any} />
       <Stack.Screen name="EndShift" component={EndShiftScreen as any} />
       <Stack.Screen name="MedicalAbsence" component={MedicalAbsenceScreen as any} />
       <Stack.Screen name="Announcements" component={AnnouncementsScreen as any} />
@@ -103,11 +100,11 @@ function RootNavigator() {
 }
 
 function AppContent() {
-  const { authUserId, currentDriver, currentProfile } = useDriver();
+  const { currentDriver } = useDriver();
 
   return (
     <ActiveShiftProvider
-      driverId={currentDriver?.id ?? currentProfile?.id ?? currentDriver?.profile_id ?? authUserId ?? null}
+      driverId={currentDriver?.id ?? null}
     >
       <NavigationContainer>
         <RootNavigator />

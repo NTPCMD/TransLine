@@ -10,8 +10,8 @@ export function useShiftLifecycle() {
   const [activeShiftId, setActiveShiftId] = useState<string | null>(shift?.id || null);
 
   useEffect(() => {
-    setActiveShiftId(activeShiftId);
-  }, [activeShiftId]);
+    setActiveShiftId(shift?.id ?? state.activeShiftId ?? null);
+  }, [shift?.id, state.activeShiftId]);
   
   return {
     activeShiftId,

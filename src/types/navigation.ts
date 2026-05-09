@@ -10,14 +10,22 @@ export type RootStackParamList = {
   StartShift: undefined;
   PreStartChecklist: { vehicleId: string };
   WaitForInstruction: undefined;
-  ReadingsAndPhotos: undefined;
+  ReadingsAndPhotos: {
+    checklistAnswers?: Array<{
+      id: string;
+      label: string;
+      status: 'pass' | 'fail' | null;
+      note: string;
+      critical: boolean;
+      sectionTitle: string;
+    }>;
+  } | undefined;
   Main: undefined;
   ActiveShift: undefined;
   ShiftDetails: undefined;
   BreakControl: undefined;
   FuelLog: undefined;
   IncidentReport: undefined;
-  SendNote: undefined;
   EndShift: undefined;
   MedicalAbsence: undefined;
   Announcements: undefined;

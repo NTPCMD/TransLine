@@ -14,7 +14,6 @@ export default function WaitForInstructionScreen(props: ScreenProps<'WaitForInst
         </Text>
       </View>
       <Button label="Call operations" onPress={() => Alert.alert('Contact', 'Calling operations centre...')} />
-      <Button label="Send a note" variant="secondary" onPress={() => navigation.navigate('SendNote')} />
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />
     </ScreenContainer>
   );

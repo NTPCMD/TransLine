@@ -1,5 +1,7 @@
-import React, { createContext, useCallback, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState, ReactNode } from 'react';
+import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
+import { networkMonitor } from '../lib/networkMonitor';
 
 export interface Shift {
   id: string;
@@ -25,6 +27,7 @@ export function ActiveShiftProvider({ children, driverId }: { children: ReactNod
   const [shift, setShift] = useState<Shift | null>(null);
   const [status, setStatus] = useState<ActiveShiftStatus>('loading');
   const [error, setError] = useState<string | null>(null);
+  const appStateRef = useRef(AppState.currentState);
 
   const reload = useCallback(async () => {
     setStatus('loading');
@@ -41,7 +44,9 @@ export function ActiveShiftProvider({ children, driverId }: { children: ReactNod
         .from('shifts')
         .select('*')
         .eq('driver_id', driverId)
-        .eq('status', 'active')
+        .is('ended_at', null)
+        .order('started_at', { ascending: false })
+        .limit(1)
         .maybeSingle();
 
       if (fetchError) {
@@ -70,6 +75,35 @@ export function ActiveShiftProvider({ children, driverId }: { children: ReactNod
   useEffect(() => {
     reload();
   }, [reload, driverId]);
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      const previousState = appStateRef.current;
+      appStateRef.current = nextState;
+
+      const resumed = (previousState === 'background' || previousState === 'inactive') && nextState === 'active';
+      if (resumed) {
+        console.log('[ActiveShift] app resumed; refreshing active shift');
+        void reload();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [reload]);
+
+  useEffect(() => {
+    const unsubscribe = networkMonitor.subscribe((isOnline) => {
+      if (!isOnline) return;
+      console.log('[ActiveShift] network reconnected; refreshing active shift');
+      void reload();
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, [reload]);
 
   return (
     <ActiveShiftContext.Provider value={{ shift, status, error, reload }}>

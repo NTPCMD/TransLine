@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatPerthTime } from '../lib/formatPerthDateTime';
 import { StyleSheet, Text } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import InfoCard from '../components/InfoCard';
@@ -20,7 +21,7 @@ export default function ShiftDetailsScreen(props: ScreenProps<'ShiftDetails'>) {
         <Text style={styles.meta}>{state.assignedVehicle?.model ?? 'Vehicle model pending'}</Text>
       </InfoCard>
       <InfoCard title="Times">
-        <Text style={styles.text}>Started: {state.shiftStartTime ? state.shiftStartTime.toLocaleTimeString() : 'Not set'}</Text>
+        <Text style={styles.text}>Started: {state.shiftStartTime ? formatPerthTime(state.shiftStartTime) : 'Not set'}</Text>
         <Text style={styles.meta}>Checklist submitted: {state.checklistSubmitted ? 'Yes' : 'No'}</Text>
         <Text style={styles.meta}>Checklist passed: {state.checklistCompleted ? 'Yes' : 'No'}</Text>
       </InfoCard>

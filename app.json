@@ -2,7 +2,7 @@
   "expo": {
     "name": "TransLine",
     "slug": "transline",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "sdkVersion": "54.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -72,7 +72,7 @@
         "backgroundColor": "#FFFFFF"
       },
       "package": "com.transline.driver",
-      "versionCode": 1,
+      "versionCode": 2,
       "permissions": [
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",

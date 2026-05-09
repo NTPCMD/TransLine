@@ -1,4 +1,5 @@
 import React from 'react';
+import { formatPerthDateTime } from '../lib/formatPerthDateTime';
 import { FlatList, StyleSheet, Text, View } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
@@ -31,7 +32,7 @@ export default function VehicleMaintenanceLogScreen(props: ScreenProps<'VehicleM
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.item}>Last fuelled: {state.lastFueled ? new Date(state.lastFueled).toLocaleString() : 'No record'}</Text>
+        <Text style={styles.item}>Last fuelled: {state.lastFueled ? formatPerthDateTime(state.lastFueled) : 'No record'}</Text>
       </View>
 
       <Button label="Back" variant="ghost" onPress={() => navigation.goBack()} />

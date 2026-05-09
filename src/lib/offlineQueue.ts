@@ -1,32 +1,61 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from './supabase';
 import { networkMonitor } from './networkMonitor';
 
 const QUEUE_STORAGE_KEY = 'transline:offlineQueue';
-const MAX_RETRY_ATTEMPTS = 5;
-const INITIAL_RETRY_DELAY = 1000; // 1 second
+const RETRY_INTERVAL_MS = 30_000;
+
+const CRITICAL_EVENT_TYPES = new Set([
+  'fuel_log',
+  'driver_log',
+  'break_start',
+  'break_end',
+  'odometer_start',
+  'odometer_end',
+  'shift_start',
+  'shift_end',
+  'location',
+]);
+
+export type QueuedShiftEventPayload = {
+  shift_id: string;
+  event_type: string;
+  latitude: number | null;
+  longitude: number | null;
+  metadata: Record<string, unknown>;
+};
 
 export interface QueuedEvent {
   id: string;
-  timestamp: string;
-  eventType: string;
-  payload: any;
-  retryCount: number;
-  status: 'pending' | 'syncing' | 'failed';
-  lastError?: string | null;
+  created_at: string;
+  table: 'shift_events';
+  payload: QueuedShiftEventPayload;
+  retry_count: number;
+  last_error: string | null;
 }
 
 type QueueChangeCallback = (queue: QueuedEvent[]) => void;
 
 class OfflineQueue {
   private queue: QueuedEvent[] = [];
-  private isSyncing: boolean = false;
+  private isSyncing = false;
   private subscribers: Set<QueueChangeCallback> = new Set();
   private unsubscribeNetwork: (() => void) | null = null;
-  private initialized: boolean = false;
+  private appStateSubscription: { remove: () => void } | null = null;
+  private retryInterval: ReturnType<typeof setInterval> | null = null;
+  private initialized = false;
+  private initPromise: Promise<void> | null = null;
+  private lastSyncError: string | null = null;
 
   constructor() {
-    this.initialize();
+    this.initPromise = this.initialize();
+  }
+
+  private async ensureInitialized() {
+    if (this.initPromise) {
+      await this.initPromise;
+    }
   }
 
   private formatSupabaseError(error: any): string {
@@ -38,423 +67,329 @@ class OfflineQueue {
     return `${message} (code=${code}, details=${details}, hint=${hint})`;
   }
 
-  private toShiftEventPayload(event: QueuedEvent): {
-    shift_id: string;
-    event_type: string;
-    latitude: number | null;
-    longitude: number | null;
-    metadata: Record<string, unknown>;
-  } | null {
-    const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-    const shiftIdRaw = (payload as any).shift_id;
-    const eventType = typeof event.eventType === 'string' ? event.eventType.trim() : '';
+  private generateId() {
+    return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`;
+  }
 
-    if (!eventType) {
-      return null;
-    }
-    if (typeof shiftIdRaw !== 'string' || !shiftIdRaw.trim()) {
-      return null;
-    }
+  private normalizePayload(eventType: string, payload: any): QueuedShiftEventPayload {
+    const raw = payload && typeof payload === 'object' ? payload : {};
 
-    const latRaw = (payload as any).latitude ?? (payload as any).lat ?? null;
-    const lngRaw = (payload as any).longitude ?? (payload as any).lng ?? null;
+    const shiftId =
+      typeof raw.shift_id === 'string'
+        ? raw.shift_id
+        : typeof raw.shiftId === 'string'
+          ? raw.shiftId
+          : '';
 
-    const latitude = typeof latRaw === 'number' && Number.isFinite(latRaw) ? latRaw : null;
-    const longitude = typeof lngRaw === 'number' && Number.isFinite(lngRaw) ? lngRaw : null;
+    const latitudeRaw = raw.latitude ?? raw.lat ?? null;
+    const longitudeRaw = raw.longitude ?? raw.lng ?? null;
 
-    const metadataRaw = (payload as any).metadata;
+    const metadataRaw = raw.metadata;
     const metadata = metadataRaw && typeof metadataRaw === 'object' && !Array.isArray(metadataRaw)
-      ? metadataRaw as Record<string, unknown>
+      ? { ...(metadataRaw as Record<string, unknown>) }
       : {};
 
-    let normalizedMetadata: Record<string, unknown> = metadata;
     if (eventType === 'fuel_log') {
       const receiptPhotoPath =
         typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
-
-      if (!receiptPhotoPath || receiptPhotoPath.startsWith('data:')) {
-        return null;
+      if (receiptPhotoPath) {
+        metadata.receipt_photo_path = receiptPhotoPath;
       }
+      if ('receipt_urls' in metadata) {
+        delete metadata.receipt_urls;
+      }
+    }
 
-      const { receipt_urls: _ignoredReceiptUrls, ...rest } = metadata;
-      normalizedMetadata = {
-        ...rest,
-        receipt_photo_path: receiptPhotoPath,
+    return {
+      shift_id: shiftId,
+      event_type: eventType,
+      latitude: typeof latitudeRaw === 'number' && Number.isFinite(latitudeRaw) ? latitudeRaw : null,
+      longitude: typeof longitudeRaw === 'number' && Number.isFinite(longitudeRaw) ? longitudeRaw : null,
+      metadata,
+    };
+  }
+
+  private isPayloadMalformed(item: QueuedEvent): string | null {
+    if (!item.payload.event_type.trim()) {
+      return 'Missing event_type';
+    }
+    if (!item.payload.shift_id.trim()) {
+      return 'Missing shift_id';
+    }
+    if (!item.payload.metadata || typeof item.payload.metadata !== 'object' || Array.isArray(item.payload.metadata)) {
+      return 'Invalid metadata payload';
+    }
+    return null;
+  }
+
+  private migrateItem(raw: any): QueuedEvent {
+    if (!raw || typeof raw !== 'object') {
+      return {
+        id: this.generateId(),
+        created_at: new Date().toISOString(),
+        table: 'shift_events',
+        payload: {
+          shift_id: '',
+          event_type: 'unknown',
+          latitude: null,
+          longitude: null,
+          metadata: {},
+        },
+        retry_count: 0,
+        last_error: 'Malformed legacy queue item',
       };
     }
 
-    // Only valid shift_events columns are returned from this function.
+    const eventType =
+      typeof raw.payload?.event_type === 'string'
+        ? raw.payload.event_type
+        : typeof raw.eventType === 'string'
+          ? raw.eventType
+          : '';
+
+    const payload = this.normalizePayload(eventType, raw.payload ?? raw);
+
     return {
-      shift_id: shiftIdRaw.trim(),
-      event_type: eventType,
-      latitude,
-      longitude,
-      metadata: normalizedMetadata,
+      id: typeof raw.id === 'string' ? raw.id : this.generateId(),
+      created_at: typeof raw.created_at === 'string'
+        ? raw.created_at
+        : typeof raw.timestamp === 'string'
+          ? raw.timestamp
+          : new Date().toISOString(),
+      table: 'shift_events',
+      payload,
+      retry_count: typeof raw.retry_count === 'number'
+        ? raw.retry_count
+        : typeof raw.retryCount === 'number'
+          ? raw.retryCount
+          : 0,
+      last_error: typeof raw.last_error === 'string'
+        ? raw.last_error
+        : typeof raw.lastError === 'string'
+          ? raw.lastError
+          : null,
     };
   }
 
   private async initialize() {
     if (this.initialized) return;
-    
-    // Load queue from storage
+
     await this.loadQueue();
-    
-    // Subscribe to network changes for auto-sync
-    this.unsubscribeNetwork = networkMonitor.subscribe(async (isOnline) => {
-      if (isOnline && this.queue.length > 0) {
-        console.log('Network connected, auto-syncing queue...');
-        await this.syncQueue();
+
+    this.unsubscribeNetwork = networkMonitor.subscribe((isOnline) => {
+      if (!isOnline) return;
+      void this.syncQueue();
+    });
+
+    this.appStateSubscription = AppState.addEventListener('change', (nextState: AppStateStatus) => {
+      if (nextState === 'active') {
+        void this.syncQueue();
       }
     });
 
+    this.retryInterval = setInterval(() => {
+      void this.syncQueue();
+    }, RETRY_INTERVAL_MS);
+
     this.initialized = true;
+    void this.syncQueue();
   }
 
-  /**
-   * Load queue from AsyncStorage
-   */
   private async loadQueue(): Promise<void> {
     try {
       const stored = await AsyncStorage.getItem(QUEUE_STORAGE_KEY);
-      if (stored) {
-        this.queue = JSON.parse(stored);
-        console.log(`Loaded ${this.queue.length} events from offline queue`);
+      if (!stored) {
+        this.queue = [];
+        return;
       }
+
+      const parsed = JSON.parse(stored);
+      if (!Array.isArray(parsed)) {
+        this.queue = [];
+        return;
+      }
+
+      this.queue = parsed.map((item) => this.migrateItem(item));
+
+      await this.saveQueue();
     } catch (error) {
-      console.error('Failed to load offline queue:', error);
+      console.error('[offlineQueue] Failed to load queue', error);
       this.queue = [];
     }
   }
 
-  /**
-   * Save queue to AsyncStorage
-   */
   private async saveQueue(): Promise<void> {
     try {
       await AsyncStorage.setItem(QUEUE_STORAGE_KEY, JSON.stringify(this.queue));
       this.notifySubscribers();
     } catch (error) {
-      console.error('Failed to save offline queue:', error);
+      console.error('[offlineQueue] Failed to save queue', error);
     }
   }
 
-  /**
-   * Clean legacy queued payloads before sync.
-   * - Removes deprecated payload.timestamp from shift_event payloads.
-   * - Drops malformed queue entries that cannot be safely synced.
-   */
-  private sanitizeQueueForSync(): {
-    cleanedCount: number;
-    droppedCount: number;
-    repairedCount: number;
-  } {
-    let cleanedCount = 0;
-    let droppedCount = 0;
-    let repairedCount = 0;
-
-    const nextQueue: QueuedEvent[] = [];
-
-    for (const event of this.queue) {
-      // Drop malformed legacy queue items safely.
-      if (!event || typeof event !== 'object' || !event.id || !event.eventType) {
-        console.warn('[offlineQueue] Dropping malformed queue item (missing id/eventType)', {
-          event,
-        });
-        droppedCount += 1;
-        continue;
-      }
-
-      const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
-      const {
-        timestamp: _legacyTimestamp,
-        event_type: _legacyEventType,
-        shift_id: shiftId,
-        lat,
-        lng,
-        latitude,
-        longitude,
-        metadata,
-      } = payload as Record<string, unknown>;
-
-      const normalizedPayload = {
-        shift_id: shiftId,
-        latitude: typeof latitude === 'number' ? latitude : (typeof lat === 'number' ? lat : null),
-        longitude: typeof longitude === 'number' ? longitude : (typeof lng === 'number' ? lng : null),
-        metadata: metadata && typeof metadata === 'object' && !Array.isArray(metadata) ? metadata : {},
-      };
-
-      let normalizedEvent: QueuedEvent = {
-        ...event,
-        payload: normalizedPayload,
-      };
-
-      if (event.status === 'failed') {
-        normalizedEvent = {
-          ...normalizedEvent,
-          status: 'pending',
-          retryCount: 0,
-        };
-        repairedCount += 1;
-      }
-
-      const shiftEventPayload = this.toShiftEventPayload(normalizedEvent);
-      if (!shiftEventPayload) {
-        console.warn('[offlineQueue] Dropping impossible malformed queue item (cannot map to shift_events columns)', {
-          eventType: event.eventType,
-          queueId: event.id,
-          payload: normalizedEvent.payload,
-        });
-        droppedCount += 1;
-        continue;
-      }
-
-      if (event.payload !== normalizedEvent.payload || event.status === 'failed') {
-        cleanedCount += 1;
-      }
-
-      nextQueue.push(normalizedEvent);
-    }
-
-    if (cleanedCount > 0 || droppedCount > 0) {
-      this.queue = nextQueue;
-    }
-
-    return { cleanedCount, droppedCount, repairedCount };
-  }
-
-  /**
-   * Notify all subscribers of queue changes
-   */
   private notifySubscribers(): void {
+    const snapshot = [...this.queue];
     this.subscribers.forEach((callback) => {
       try {
-        callback([...this.queue]);
+        callback(snapshot);
       } catch (error) {
-        console.error('Error in queue change callback:', error);
+        console.error('[offlineQueue] Error in queue callback', error);
       }
     });
   }
 
-  /**
-   * Subscribe to queue changes
-   */
   subscribe(callback: QueueChangeCallback): () => void {
     this.subscribers.add(callback);
-    
-    // Immediately call with current queue
     try {
       callback([...this.queue]);
     } catch (error) {
-      console.error('Error in initial queue callback:', error);
+      console.error('[offlineQueue] Error in initial queue callback', error);
     }
 
-    // Return unsubscribe function
     return () => {
       this.subscribers.delete(callback);
     };
   }
 
-  /**
-   * Add event to queue
-   */
   async addEvent(eventType: string, payload: any): Promise<void> {
-    const event: QueuedEvent = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
-      timestamp: new Date().toISOString(),
-      eventType,
-      payload,
-      retryCount: 0,
-      status: 'pending',
-      lastError: null,
+    await this.ensureInitialized();
+
+    const normalized = this.normalizePayload(eventType, payload);
+
+    const item: QueuedEvent = {
+      id: this.generateId(),
+      created_at: new Date().toISOString(),
+      table: 'shift_events',
+      payload: normalized,
+      retry_count: 0,
+      last_error: null,
     };
 
-    this.queue.push(event);
+    const malformedReason = this.isPayloadMalformed(item);
+    if (malformedReason) {
+      item.last_error = malformedReason;
+    }
+
+    this.queue.push(item);
     await this.saveQueue();
-    
-    console.log('[offlineQueue] Added event to offline queue', {
-      queueId: event.id,
-      eventType,
-      shiftId: payload?.shift_id ?? null,
-      payload,
+
+    console.log('[offlineQueue] enqueue', {
+      id: item.id,
+      event_type: item.payload.event_type,
+      shift_id: item.payload.shift_id,
+      critical: CRITICAL_EVENT_TYPES.has(item.payload.event_type),
+      malformed: malformedReason ?? null,
     });
+    console.log('[offlineQueue] remaining count', { count: this.queue.length });
   }
 
-  /**
-   * Sync all pending events
-   */
   async syncQueue(): Promise<void> {
-    if (this.isSyncing) {
-      console.log('Sync already in progress, skipping...');
-      return;
-    }
+    await this.ensureInitialized();
 
+    if (this.isSyncing) return;
     if (this.queue.length === 0) {
-      console.log('Queue is empty, nothing to sync');
+      this.lastSyncError = null;
       return;
     }
 
-    const { cleanedCount, droppedCount, repairedCount } = this.sanitizeQueueForSync();
-    if (cleanedCount > 0 || droppedCount > 0 || repairedCount > 0) {
-      console.log(
-        `[offlineQueue] Repair queue before sync: cleaned=${cleanedCount}, repaired_failed=${repairedCount}, dropped_malformed=${droppedCount}`
-      );
-      await this.saveQueue();
-    }
-
-    // Check if online
     const isOnline = await networkMonitor.isOnline();
-    if (!isOnline) {
-      console.log('Device is offline, cannot sync queue');
-      return;
-    }
+    if (!isOnline) return;
 
     this.isSyncing = true;
-    console.log(`Starting sync of ${this.queue.length} queued events...`);
+    console.log('[offlineQueue] retry start', { count: this.queue.length });
 
-    const remainingQueue: QueuedEvent[] = [];
+    const remaining: QueuedEvent[] = [];
 
-    for (const event of this.queue) {
-      // Update status to syncing (in memory only, will save at end)
-      event.status = 'syncing';
-      event.lastError = null;
-      // Notify UI of status change
-      this.notifySubscribers();
+    for (const item of this.queue) {
+      const malformedReason = this.isPayloadMalformed(item);
+      if (malformedReason) {
+        item.retry_count += 1;
+        item.last_error = malformedReason;
+        this.lastSyncError = malformedReason;
+        console.log('[offlineQueue] retry failed', {
+          id: item.id,
+          event_type: item.payload.event_type,
+          retry_count: item.retry_count,
+          error: malformedReason,
+        });
+        remaining.push(item);
+        continue;
+      }
 
       try {
-        const shiftEventPayload = this.toShiftEventPayload(event);
-        if (!shiftEventPayload) {
-          console.warn('[offlineQueue] Dropping impossible malformed queued event before insert', {
-            queueId: event.id,
-            eventType: event.eventType,
-            payload: event.payload,
-          });
-          continue;
-        }
-
-        console.log('[offlineQueue] Syncing queued shift_event', {
-          queueId: event.id,
-          eventType: event.eventType,
-          shiftId: shiftEventPayload.shift_id,
-          payload: shiftEventPayload,
-        });
-
-        const { error } = await supabase.from('shift_events').insert(shiftEventPayload);
-
+        const { error } = await supabase.from('shift_events').insert(item.payload);
         if (error) {
-          const formattedError = this.formatSupabaseError(error);
-          event.lastError = formattedError;
-          console.error('[offlineQueue] Failed to sync queued shift_event', {
-            queueId: event.id,
-            eventType: event.eventType,
-            shiftId: shiftEventPayload.shift_id,
-            payload: shiftEventPayload,
-            supabaseError: formattedError,
-          });
           throw error;
         }
 
-        // Success - remove from queue
-        console.log('[offlineQueue] Successfully synced queued shift_event', {
-          queueId: event.id,
-          eventType: event.eventType,
-          shiftId: shiftEventPayload.shift_id,
-          payload: shiftEventPayload,
+        console.log('[offlineQueue] retry success', {
+          id: item.id,
+          event_type: item.payload.event_type,
         });
-      } catch (error: any) {
-        const formattedError = this.formatSupabaseError(error);
-        console.error('[offlineQueue] Failed to sync event', {
-          queueId: event.id,
-          eventType: event.eventType,
-          shiftId: event?.payload?.shift_id ?? null,
-          payload: event?.payload ?? null,
-          supabaseError: formattedError,
+      } catch (err: any) {
+        const formatted = this.formatSupabaseError(err);
+        item.retry_count += 1;
+        item.last_error = formatted;
+        this.lastSyncError = formatted;
+
+        console.log('[offlineQueue] retry failed', {
+          id: item.id,
+          event_type: item.payload.event_type,
+          retry_count: item.retry_count,
+          error: formatted,
         });
-        
-        // Increment retry count
-        event.retryCount += 1;
-        
-        // Mark as failed if max retries reached
-        if (event.retryCount >= MAX_RETRY_ATTEMPTS) {
-          event.status = 'failed';
-          console.warn('[offlineQueue] Event failed after max retries', {
-            queueId: event.id,
-            eventType: event.eventType,
-            shiftId: event?.payload?.shift_id ?? null,
-            retries: event.retryCount,
-            maxRetries: MAX_RETRY_ATTEMPTS,
-            lastError: event.lastError ?? formattedError,
-          });
-        } else {
-          event.status = 'pending';
-        }
-        
-        // Keep in queue
-        remainingQueue.push(event);
+        remaining.push(item);
       }
     }
 
-    this.queue = remainingQueue;
-    // Save once at the end instead of after each event
+    this.queue = remaining;
+    if (remaining.length === 0) {
+      this.lastSyncError = null;
+    }
     await this.saveQueue();
-    
+
+    console.log('[offlineQueue] remaining count', { count: this.queue.length });
     this.isSyncing = false;
-    console.log(`Sync completed. ${remainingQueue.length} events remaining in queue`);
   }
 
-  /**
-   * Get current queue
-   */
+  async retryNow(): Promise<void> {
+    console.log('[offlineQueue] manual retry pressed');
+    await this.syncQueue();
+  }
+
   getQueue(): QueuedEvent[] {
     return [...this.queue];
   }
 
-  /**
-   * Remove event from queue
-   */
-  async removeEvent(id: string): Promise<void> {
-    const initialLength = this.queue.length;
-    this.queue = this.queue.filter(event => event.id !== id);
-    
-    if (this.queue.length !== initialLength) {
-      await this.saveQueue();
-      console.log(`Removed event from queue: ${id}`);
-    }
-  }
-
-  /**
-   * Clear entire queue
-   */
-  async clearQueue(): Promise<void> {
-    this.queue = [];
-    await this.saveQueue();
-    console.log('Cleared all events from queue');
-  }
-
-  /**
-   * Get count of queued events
-   */
   getQueuedCount(): number {
     return this.queue.length;
   }
 
-  /**
-   * Get count of pending events (excluding failed)
-   */
-  getPendingCount(): number {
-    return this.queue.filter(event => event.status !== 'failed').length;
+  getLastSyncError(): string | null {
+    return this.lastSyncError;
   }
 
-  /**
-   * Cleanup resources
-   */
+  async clearQueue(): Promise<void> {
+    this.queue = [];
+    this.lastSyncError = null;
+    await this.saveQueue();
+  }
+
   destroy() {
     if (this.unsubscribeNetwork) {
       this.unsubscribeNetwork();
       this.unsubscribeNetwork = null;
     }
+    if (this.appStateSubscription) {
+      this.appStateSubscription.remove();
+      this.appStateSubscription = null;
+    }
+    if (this.retryInterval) {
+      clearInterval(this.retryInterval);
+      this.retryInterval = null;
+    }
     this.subscribers.clear();
   }
 }
 
-// Export singleton instance
 export const offlineQueue = new OfflineQueue();

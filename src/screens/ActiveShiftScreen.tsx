@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { formatPerthTime } from '../lib/formatPerthDateTime';
 import { Modal, Pressable, SafeAreaView, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
 import * as Location from 'expo-location';
 import Button from '../components/Button';
@@ -9,11 +10,13 @@ import { useAppState } from '../state/AppStateContext';
 import { useDriver } from '../state/DriverContext';
 import type { ScreenProps } from '../types/navigation';
 import { useActiveShift } from '../state/ActiveShiftContext';
+import { setDriverOffline, setDriverOnline } from '../lib/presence';
 
 const SAMPLE_INTERVAL_MS = 3 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
 const STOP_RADIUS_METERS = 75;
 const STOP_MIN_DURATION_MS = 3 * 60 * 1000;
+const DEVICE_ID = 'driver-app';
 
 const toRadians = (v: number) => (v * Math.PI) / 180;
 
@@ -37,7 +40,6 @@ const MENU_ITEMS = [
 const NAV_BUTTONS = [
   ['Break', 'BreakControl'],
   ['Fuel Log', 'FuelLog'],
-  ['Send Note', 'SendNote'],
   ['Shift Details', 'ShiftDetails'],
 ] as const;
 
@@ -51,7 +53,7 @@ type StopCandidate = {
 export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShift'>) {
   const { state, createEvent } = useAppState();
   const { currentDriver: driver, currentVehicle: assigned } = useDriver();
-  const { shift: activeShift } = useActiveShift();
+  const { shift: activeShift, status: activeShiftStatus, reload: reloadActiveShift } = useActiveShift();
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [now, setNow] = useState(Date.now()); // ticks every second to keep countdowns live
@@ -110,6 +112,12 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
     stopCandidateRef.current = null;
     isSamplingRef.current = false;
   };
+
+  const trackingReason = useMemo(() => {
+    if (activeShift?.id) return 'Active shift';
+    if (activeShiftStatus === 'loading') return 'Resolving active shift';
+    return 'No active shift';
+  }, [activeShift?.id, activeShiftStatus]);
 
   // Fetches GPS, runs stop detection, and sends a heartbeat if one is due
   const pollAndSyncLocation = async (shiftId: string | null) => {
@@ -201,7 +209,24 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   // Start/restart tracking whenever the active shift changes
   useEffect(() => {
     const shiftId = activeShift?.id ?? null;
-    if (!shiftId) { stopPolling(); return; }
+    if (!shiftId) {
+      stopPolling();
+      console.log('[Tracking] upload disabled');
+      console.log('[Tracking] reason', { reason: 'No active shift' });
+      console.log('[Tracking] shiftId', { shiftId: null });
+      if (driver?.id) {
+        void setDriverOffline(driver.id, DEVICE_ID);
+      }
+      return;
+    }
+
+    console.log('[Tracking] activeShift resolved', { shiftId });
+    console.log('[Tracking] upload enabled');
+    console.log('[Tracking] reason', { reason: 'Active shift' });
+    console.log('[Tracking] shiftId', { shiftId });
+    if (driver?.id) {
+      void setDriverOnline(driver.id, DEVICE_ID, shiftId);
+    }
 
     let cancelled = false;
     (async () => {
@@ -212,15 +237,26 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
     })();
 
     return () => { cancelled = true; stopPolling(); };
-  }, [state.activeShiftId, activeShift?.vehicle_id, activeShift?.started_at]);
+  }, [activeShift?.id, activeShift?.vehicle_id, activeShift?.started_at, driver?.id]);
 
   // Redirect to Dashboard when shift ends
   useEffect(() => {
-    if (activeShift?.id) { redirectHandledRef.current = false; return; }
+    if (activeShift?.id || state.activeShiftId || activeShiftStatus === 'loading') {
+      redirectHandledRef.current = false;
+      return;
+    }
     if (redirectHandledRef.current) return;
     redirectHandledRef.current = true;
     navigation.reset({ index: 0, routes: [{ name: 'Dashboard' }] });
-  }, [activeShift?.id]);
+  }, [activeShift?.id, activeShiftStatus, navigation, state.activeShiftId]);
+
+  useEffect(() => {
+    if (!state.activeShiftId || activeShift?.id || activeShiftStatus === 'loading') {
+      return;
+    }
+
+    void reloadActiveShift();
+  }, [activeShift?.id, activeShiftStatus, reloadActiveShift, state.activeShiftId]);
 
   // Request permissions on mount
   useEffect(() => { void updatePermissionStatus(true); }, []);
@@ -265,7 +301,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   const statusRows: [string, string][] = [
     ['Tracking', isPolling ? 'Active' : 'Paused'],
     ['GPS permission', formatPermission(permissionStatus)],
-    ['Last fix', lastFixTime ? lastFixTime.toLocaleTimeString() : 'Not available'],
+    ['Last fix', lastFixTime ? formatPerthTime(lastFixTime) : 'Not available'],
     ['Next GPS check', pollCountdown !== null ? formatCountdown(pollCountdown) : 'Not scheduled'],
     ['Next upload', uploadCountdown !== null ? formatCountdown(uploadCountdown) : 'Pending first heartbeat'],
     ['Last coordinates', formatCoordinate(driverCoordinate)],
@@ -330,12 +366,10 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
               <Text style={styles.statusValue}>{value}</Text>
             </View>
           ))}
-          {!state.activeShiftId && (
-            <View style={styles.statusRow}>
-              <Text style={styles.statusLabel}>Tracking reason</Text>
-              <Text style={styles.statusValue}>No active shift</Text>
-            </View>
-          )}
+          <View style={styles.statusRow}>
+            <Text style={styles.statusLabel}>Tracking reason</Text>
+            <Text style={styles.statusValue}>{trackingReason}</Text>
+          </View>
           <View style={styles.buttonRow}>
             <Button label="Request GPS Permissions" variant="secondary" onPress={handleRequestPermissions} />
             <Button label="Refresh Location" variant="ghost" onPress={handleRefreshLocation} />

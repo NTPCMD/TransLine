@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import { formatPerthDateTime } from '../lib/formatPerthDateTime';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
@@ -109,7 +110,7 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
         </Text>
         {isShiftActive && appState.shiftStartTime ? (
           <Text style={styles.secondaryText}>
-            Started: {new Date(appState.shiftStartTime).toLocaleString()}
+            Started: {formatPerthDateTime(appState.shiftStartTime)}
           </Text>
         ) : null}
       </InfoCard>

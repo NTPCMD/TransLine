@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { formatPerthTime } from '../lib/formatPerthDateTime';
 import { Alert, StyleSheet, Text, View, Pressable } from 'react-native';
 import ScreenContainer from '../components/ScreenContainer';
 import InfoCard from '../components/InfoCard';
@@ -38,7 +39,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
         .from('shift_events')
         .select('event_type, created_at, metadata')
         .eq('shift_id', state.activeShiftId)
-        .in('event_type', ['shift_start', 'shift_end'])
+        .in('event_type', ['odometer_start', 'odometer_end', 'shift_start', 'shift_end'])
         .order('created_at', { ascending: false });
       if (error) {
         setShiftLoadError(error.message);
@@ -46,12 +47,16 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       }
 
       const events = data ?? [];
-      const hasShiftEnd = events.some((event) => event.event_type === 'shift_end');
+      const hasShiftEnd = events.some(
+        (event) => event.event_type === 'odometer_end' || event.event_type === 'shift_end'
+      );
       if (hasShiftEnd) {
         setShiftLoadError('End odometer already captured.');
       }
 
-      const shiftStartEvent = events.find((event) => event.event_type === 'shift_start');
+      const shiftStartEvent =
+        events.find((event) => event.event_type === 'odometer_start')
+        ?? events.find((event) => event.event_type === 'shift_start');
       const metadata = shiftStartEvent?.metadata && typeof shiftStartEvent.metadata === 'object'
         ? (shiftStartEvent.metadata as Record<string, unknown>)
         : null;
@@ -113,7 +118,10 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       return;
     }
     const odometerValue = Number(endOdometerReading);
+    const validationVehicleId = state.activeShiftVehicleId ?? state.vehicleId ?? null;
+    console.log('[OdometerValidation] vehicleId', { vehicleId: validationVehicleId });
     console.log('[EndShift] odometer value', { odometerValue });
+    console.log('[OdometerValidation] typedEnd', { typedEnd: odometerValue });
     if (!Number.isInteger(odometerValue)) {
       const message = 'Please enter a valid whole-number odometer reading.';
       console.warn('[EndShift] validation failed', { reason: message, odometerValue });
@@ -153,11 +161,14 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     }
 
     const startValue = startOdometerValue ?? Number(state.odometerReading);
+    console.log('[OdometerValidation] latestVehicleOdometer', { latestVehicleOdometer: startValue });
+    console.log('[OdometerValidation] typedStart', { typedStart: startValue });
     if (odometerValue < startValue) {
-      const message = 'Final odometer must be greater than or equal to the start odometer.';
+      const message = 'Final odometer cannot be less than start odometer.';
+      console.warn('[OdometerValidation] blocked reason', { reason: message });
       console.warn('[EndShift] validation failed', { reason: message, startValue, odometerValue });
       setSubmitError(message);
-      Alert.alert('Invalid Input', 'Final odometer must be greater than or equal to the start odometer.');
+      Alert.alert('Invalid Input', 'Final odometer cannot be less than start odometer.');
       return;
     }
 
@@ -225,7 +236,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     ?? 'Unknown';
 
   const shiftStartLabel = state.shiftStartTime
-    ? new Date(state.shiftStartTime).toLocaleTimeString()
+    ? formatPerthTime(new Date(state.shiftStartTime))
     : 'Not set';
 
   return (

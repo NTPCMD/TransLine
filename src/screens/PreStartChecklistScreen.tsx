@@ -204,7 +204,7 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
     if (hasCriticalFailures) {
       navigation.navigate('WaitForInstruction');
     } else {
-      navigation.navigate('ReadingsAndPhotos');
+      navigation.navigate('ReadingsAndPhotos', { checklistAnswers });
     }
   };
 
