@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Image, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withTiming, withSpring } from 'react-native-reanimated';
+import { TIMING_MED, SPRING_ENTER, COLORS } from '../lib/animations';
 
 interface ScreenContainerProps {
   title?: string;
@@ -8,19 +10,34 @@ interface ScreenContainerProps {
 }
 
 export default function ScreenContainer({ title, subtitle, children }: ScreenContainerProps) {
+  const opacity = useSharedValue(0);
+  const translateY = useSharedValue(14);
+
+  useEffect(() => {
+    opacity.value = withTiming(1, { duration: 260 });
+    translateY.value = withSpring(0, SPRING_ENTER);
+  }, []);
+
+  const animStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ translateY: translateY.value }],
+  }));
+
   return (
     <SafeAreaView style={styles.safeArea}>
-      <ScrollView contentContainerStyle={styles.scrollContent}>
-        <View style={styles.headerArea}>
-          <Image source={require('../../assets/transline-logo.png')} style={styles.logoImage} resizeMode="contain" />
-          <View>
-            <Text style={styles.brand}>Transline</Text>
-            <Text style={styles.tagline}>Compliance in motion</Text>
+      <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
+        <Animated.View style={animStyle}>
+          <View style={styles.headerArea}>
+            <Image source={require('../../assets/transline-logo.png')} style={styles.logoImage} resizeMode="contain" />
+            <View>
+              <Text style={styles.brand}>Transline</Text>
+              <Text style={styles.tagline}>Compliance in motion</Text>
+            </View>
           </View>
-        </View>
-        {title && <Text style={styles.title}>{title}</Text>}
-        {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
-        <View style={styles.content}>{children}</View>
+          {title && <Text style={styles.title}>{title}</Text>}
+          {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
+          <View style={styles.content}>{children}</View>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -29,17 +46,17 @@ export default function ScreenContainer({ title, subtitle, children }: ScreenCon
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#F5F5F5',
+    backgroundColor: COLORS.background,
   },
   scrollContent: {
     padding: 20,
-    paddingBottom: 32,
+    paddingBottom: 40,
   },
   headerArea: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 20,
   },
   logoImage: {
     width: 88,
@@ -47,22 +64,26 @@ const styles = StyleSheet.create({
   },
   brand: {
     fontSize: 22,
-    fontWeight: '700',
-    color: '#111827',
+    fontWeight: '800',
+    color: COLORS.textPrimary,
+    letterSpacing: -0.4,
   },
   tagline: {
-    color: '#6B7280',
+    color: COLORS.textMuted,
+    fontSize: 13,
+    letterSpacing: 0.1,
   },
   title: {
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '700',
-    marginTop: 4,
-    marginBottom: 6,
-    color: '#111827',
+    marginBottom: 4,
+    color: COLORS.textPrimary,
+    letterSpacing: -0.5,
   },
   subtitle: {
-    color: '#4B5563',
-    marginBottom: 12,
+    color: COLORS.textSecondary,
+    marginBottom: 18,
+    fontSize: 14,
   },
   content: {
     gap: 12,

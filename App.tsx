@@ -1,11 +1,17 @@
 import 'react-native-gesture-handler';
 import 'react-native-reanimated';
-import React, { useEffect } from 'react';
-import { View, Text } from 'react-native';
-import { NavigationContainer } from '@react-navigation/native';
+import React, { useCallback, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, useWindowDimensions } from 'react-native';
+import { NavigationContainer, useNavigationContainerRef } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createDrawerNavigator } from '@react-navigation/drawer';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 import { AppStateProvider } from './src/state/AppStateContext';
 import { DriverProvider, useDriver } from './src/state/DriverContext';
 import { AssignmentProvider } from './src/state/AssignmentContext';
@@ -37,9 +43,17 @@ import OfflineQueueScreen from './src/screens/OfflineQueueScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import ShiftHistoryScreen from './src/screens/ShiftHistoryScreen';
 import OdometerCaptureScreen from './src/screens/OdometerCaptureScreen';
+import ChecklistApprovalScreen from './src/screens/ChecklistApprovalScreen';
 
 const Stack = createNativeStackNavigator();
 const Drawer = createDrawerNavigator();
+
+const getActiveRouteName = (state: any): string | undefined => {
+  const route = state?.routes?.[state.index ?? 0];
+  if (!route) return undefined;
+  if (route.state) return getActiveRouteName(route.state);
+  return route.name;
+};
 
 function MainDrawer() {
   return (
@@ -69,7 +83,14 @@ function MainDrawer() {
 
 function RootNavigator() {
   return (
-    <Stack.Navigator initialRouteName="Splash" screenOptions={{ headerShown: false }}>
+    <Stack.Navigator
+      initialRouteName="Splash"
+      screenOptions={{
+        headerShown: false,
+        animation: 'fade',
+        animationDuration: 180,
+      }}
+    >
       <Stack.Screen name="Splash" component={SplashScreen as any} />
       <Stack.Screen name="Login" component={LoginScreen as any} />
       <Stack.Screen name="Dashboard" component={DashboardScreen as any} />
@@ -95,20 +116,97 @@ function RootNavigator() {
       <Stack.Screen name="Profile" component={ProfileScreen as any} />
       <Stack.Screen name="ShiftHistory" component={ShiftHistoryScreen as any} />
       <Stack.Screen name="OdometerCapture" component={OdometerCaptureScreen} />
+      <Stack.Screen name="ChecklistApproval" component={ChecklistApprovalScreen as any} />
     </Stack.Navigator>
   );
 }
 
 function AppContent() {
   const { currentDriver } = useDriver();
+  const navigationRef = useNavigationContainerRef();
+  const previousRouteRef = useRef<string | undefined>(undefined);
+  const { width } = useWindowDimensions();
+
+  const sweepX = useSharedValue(-320);
+  const sweepOpacity = useSharedValue(0);
+  const transitionMaskOpacity = useSharedValue(0);
+
+  const sweepStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: sweepX.value }],
+    opacity: sweepOpacity.value,
+  }));
+
+  const transitionMaskStyle = useAnimatedStyle(() => ({
+    opacity: transitionMaskOpacity.value,
+  }));
+
+  const playTruckTransition = useCallback(() => {
+    const panelWidth = Math.max(width * 0.72, 280);
+    sweepX.value = -panelWidth;
+    sweepOpacity.value = 1;
+    transitionMaskOpacity.value = 1;
+
+    sweepX.value = withTiming(width, {
+      duration: 3000,
+      easing: Easing.bezier(0.22, 1, 0.36, 1),
+    });
+    sweepOpacity.value = withTiming(0, {
+      duration: 3000,
+      easing: Easing.linear,
+    });
+    transitionMaskOpacity.value = withTiming(0, {
+      duration: 3000,
+      easing: Easing.linear,
+    });
+  }, [sweepOpacity, sweepX, transitionMaskOpacity, width]);
 
   return (
     <ActiveShiftProvider
       driverId={currentDriver?.id ?? null}
     >
-      <NavigationContainer>
+      <NavigationContainer
+        ref={navigationRef}
+        onReady={() => {
+          previousRouteRef.current = getActiveRouteName(navigationRef.getRootState());
+        }}
+        onStateChange={(state) => {
+          const currentRoute = getActiveRouteName(state);
+          if (!currentRoute) return;
+
+          if (previousRouteRef.current && previousRouteRef.current !== currentRoute) {
+            playTruckTransition();
+          }
+
+          previousRouteRef.current = currentRoute;
+        }}
+      >
         <RootNavigator />
       </NavigationContainer>
+
+      <Animated.View
+        pointerEvents="none"
+        style={[styles.transitionMask, transitionMaskStyle]}
+      />
+
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.transitionSweep,
+          { width: Math.max(width * 0.72, 280) },
+          sweepStyle,
+        ]}
+      >
+        <View style={styles.truckMark}>
+          <View style={styles.truckCab} />
+          <View style={styles.truckBody} />
+          <View style={styles.truckWheelRow}>
+            <View style={styles.truckWheel} />
+            <View style={styles.truckWheel} />
+            <View style={styles.truckWheel} />
+          </View>
+        </View>
+        <Text style={styles.transitionText}>TRANSLINE</Text>
+      </Animated.View>
     </ActiveShiftProvider>
   );
 }
@@ -148,3 +246,60 @@ export default function App() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  transitionMask: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#C62828',
+    zIndex: 4900,
+  },
+  transitionSweep: {
+    position: 'absolute',
+    top: 0,
+    bottom: 0,
+    left: 0,
+    backgroundColor: '#C62828',
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 5000,
+  },
+  transitionText: {
+    color: '#FFFFFF',
+    fontWeight: '800',
+    letterSpacing: 1.4,
+    fontSize: 14,
+    marginTop: 12,
+  },
+  truckMark: {
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  truckCab: {
+    width: 28,
+    height: 14,
+    borderTopLeftRadius: 3,
+    borderTopRightRadius: 3,
+    backgroundColor: '#FFFFFF',
+    marginRight: 42,
+  },
+  truckBody: {
+    width: 88,
+    height: 24,
+    borderRadius: 4,
+    backgroundColor: '#FFFFFF',
+    marginTop: 2,
+  },
+  truckWheelRow: {
+    width: 88,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingHorizontal: 8,
+    marginTop: 4,
+  },
+  truckWheel: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#1F2937',
+  },
+});

@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withSpring, withTiming } from 'react-native-reanimated';
+import { SPRING_SMOOTH, TIMING_MED, COLORS, SHADOWS } from '../lib/animations';
 
 interface InfoCardProps {
   title: string;
@@ -7,27 +9,43 @@ interface InfoCardProps {
 }
 
 export default function InfoCard({ title, children }: InfoCardProps) {
+  const translateY = useSharedValue(10);
+  const opacity = useSharedValue(0);
+
+  useEffect(() => {
+    translateY.value = withSpring(0, SPRING_SMOOTH);
+    opacity.value = withTiming(1, TIMING_MED);
+  }, []);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: translateY.value }],
+    opacity: opacity.value,
+  }));
+
   return (
-    <View style={styles.card}>
+    <Animated.View style={[styles.card, animStyle]}>
       <Text style={styles.title}>{title}</Text>
       <View style={styles.body}>{children}</View>
-    </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: COLORS.surface,
     borderRadius: 16,
-    padding: 16,
+    padding: 18,
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: COLORS.border,
     gap: 8,
+    ...SHADOWS.card,
   },
   title: {
     fontWeight: '700',
-    fontSize: 16,
-    color: '#111827',
+    fontSize: 13,
+    color: COLORS.textMuted,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
   body: {
     gap: 6,

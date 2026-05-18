@@ -9,6 +9,17 @@ export type RootStackParamList = {
   DriverDeclaration: undefined;
   StartShift: undefined;
   PreStartChecklist: { vehicleId: string };
+  ChecklistApproval: {
+    approvalRequestId: string;
+    vehicleId: string;
+    failedItems: Array<{
+      id: string;
+      label: string;
+      note: string;
+      critical: boolean;
+      sectionTitle: string;
+    }>;
+  };
   WaitForInstruction: undefined;
   ReadingsAndPhotos: {
     checklistAnswers?: Array<{

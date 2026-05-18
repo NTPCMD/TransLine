@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { formatPerthTime } from '../lib/formatPerthDateTime';
 import { Modal, Pressable, SafeAreaView, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming, withSpring } from 'react-native-reanimated';
+import { SPRING_SMOOTH, TIMING_MED, COLORS } from '../lib/animations';
 import * as Location from 'expo-location';
 import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
@@ -49,6 +51,68 @@ type StopCandidate = {
   anchorLongitude: number;
   reported: boolean; // prevents duplicate stop events at same location
 };
+
+// ─── Animated banner with pulsing GPS dot ─────────────────────────────────
+function ActiveBanner({
+  driverName,
+  vehicleLabel,
+  shiftDuration,
+  isTracking,
+  onMenuPress,
+}: {
+  driverName: string;
+  vehicleLabel: string;
+  shiftDuration: string;
+  isTracking: boolean;
+  onMenuPress: () => void;
+}) {
+  const dotScale = useSharedValue(1);
+  const dotOpacity = useSharedValue(1);
+
+  useEffect(() => {
+    dotScale.value = withRepeat(
+      withSequence(withTiming(1.6, { duration: 700 }), withTiming(1, { duration: 700 })),
+      -1,
+      false,
+    );
+    dotOpacity.value = withRepeat(
+      withSequence(withTiming(0.25, { duration: 700 }), withTiming(1, { duration: 700 })),
+      -1,
+      false,
+    );
+  }, []);
+
+  const dotAnimStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: dotScale.value }],
+    opacity: dotOpacity.value,
+  }));
+
+  return (
+    <>
+      <View style={styles.banner}>
+        <View style={styles.bannerLeft}>
+          <Animated.View style={[styles.dot, dotAnimStyle]} />
+          <View>
+            <Text style={styles.bannerText}>ON SHIFT</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5 }}>{driverName} • {vehicleLabel}</Text>
+          </View>
+        </View>
+        <TouchableOpacity onPress={onMenuPress} style={styles.menuButton}>
+          <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Menu</Text>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.metricsRow}>
+        {([['Duration', shiftDuration], ['GPS', isTracking ? 'Active' : 'Paused'], ['Sync', 'Live']] as [string, string][]).map(([label, value]) => (
+          <View key={label} style={styles.metricItem}>
+            <Text style={styles.metricLabel}>{label}</Text>
+            <Text style={[styles.metricValue, label === 'GPS' && isTracking ? { color: COLORS.success } : {}]}>{value}</Text>
+          </View>
+        ))}
+      </View>
+    </>
+  );
+}
 
 export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShift'>) {
   const { state, createEvent } = useAppState();
@@ -313,21 +377,19 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
     <ScreenContainer>
       <NetworkStatusBanner />
 
-      <View style={styles.banner}>
-        <View style={styles.bannerLeft}>
-          <View style={styles.dot} />
-          <View>
-            <Text style={styles.bannerText}>ON SHIFT</Text>
-            <Text style={{ color: '#fff', fontSize: 12 }}>{driver?.name ?? 'Driver'} • {finalVehicleLabel}</Text>
-          </View>
-        </View>
-        <TouchableOpacity onPress={() => setMenuVisible(true)} style={styles.menuButton}>
-          <Text style={{ color: '#fff' }}>Menu</Text>
-        </TouchableOpacity>
+      <ActiveBanner
+        driverName={driver?.name ?? 'Driver'}
+        vehicleLabel={finalVehicleLabel}
+        shiftDuration={getShiftDuration()}
+        isTracking={isPolling}
+        onMenuPress={() => setMenuVisible(true)}
+      />
 
-        <Modal visible={menuVisible} transparent animationType="slide" onRequestClose={() => setMenuVisible(false)}>
-          <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
-            <SafeAreaView style={styles.menuPanel}>
+      <Modal visible={menuVisible} transparent animationType="none" onRequestClose={() => setMenuVisible(false)}>
+        <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
+          <Animated.View style={styles.menuPanel}>
+            <SafeAreaView>
+              <View style={styles.menuHandle} />
               <Text style={styles.menuTitle}>Navigation</Text>
               {MENU_ITEMS.map(({ label, screen }) => (
                 <TouchableOpacity key={screen} style={styles.menuItem} onPress={() => { setMenuVisible(false); navigation.navigate(screen as any); }}>
@@ -335,21 +397,12 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
                 </TouchableOpacity>
               ))}
               <TouchableOpacity style={[styles.menuItem, styles.menuItemClose]} onPress={() => setMenuVisible(false)}>
-                <Text style={[styles.menuItemText, { color: '#6B7280' }]}>Close</Text>
+                <Text style={[styles.menuItemText, { color: COLORS.textMuted }]}>Close</Text>
               </TouchableOpacity>
             </SafeAreaView>
-          </Pressable>
-        </Modal>
-      </View>
-
-      <View style={styles.metricsRow}>
-        {[['Duration', getShiftDuration()], ['GPS', 'Active'], ['Sync', 'Just now']].map(([label, value]) => (
-          <View key={label} style={styles.metricItem}>
-            <Text style={styles.metricLabel}>{label}</Text>
-            <Text style={styles.metricValue}>{value}</Text>
-          </View>
-        ))}
-      </View>
+          </Animated.View>
+        </Pressable>
+      </Modal>
 
       <View style={{ padding: 16 }}>
         {hasShiftVehicleConflict && (
@@ -406,21 +459,22 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
 }
 
 const styles = StyleSheet.create({
-  banner: { backgroundColor: '#C62828', padding: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  bannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  dot: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#fff' },
-  bannerText: { color: '#fff', fontWeight: '700' },
-  menuButton: { padding: 8 },
-  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'flex-end' },
-  menuPanel: { backgroundColor: '#fff', borderTopLeftRadius: 16, borderTopRightRadius: 16, paddingHorizontal: 20, paddingBottom: 24, paddingTop: 16 },
-  menuTitle: { fontSize: 16, fontWeight: '700', color: '#111827', marginBottom: 12 },
-  menuItem: { paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  menuItemClose: { borderBottomWidth: 0, marginTop: 8, alignItems: 'center' },
-  menuItemText: { fontSize: 15, color: '#111827' },
-  metricsRow: { backgroundColor: '#F2F2F2', padding: 12, flexDirection: 'row', justifyContent: 'space-between' },
+  banner: { backgroundColor: COLORS.accent, padding: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  bannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  dot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: '#fff' },
+  bannerText: { color: '#fff', fontWeight: '700', fontSize: 15, letterSpacing: 0.5 },
+  menuButton: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.18)' },
+  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  menuHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', alignSelf: 'center', marginBottom: 14 },
+  menuPanel: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: 8, paddingTop: 16 },
+  menuTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textMuted, marginBottom: 8, letterSpacing: 0.6, textTransform: 'uppercase' },
+  menuItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
+  menuItemClose: { borderBottomWidth: 0, marginTop: 8, alignItems: 'center', paddingBottom: 8 },
+  menuItemText: { fontSize: 16, color: COLORS.textPrimary, fontWeight: '500' },
+  metricsRow: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingVertical: 12, paddingHorizontal: 8, flexDirection: 'row', justifyContent: 'space-around' },
   metricItem: { alignItems: 'center', flex: 1 },
-  metricLabel: { color: '#9E9E9E', fontSize: 12 },
-  metricValue: { fontWeight: '700', marginTop: 6 },
+  metricLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '500', letterSpacing: 0.4, textTransform: 'uppercase' },
+  metricValue: { fontWeight: '700', marginTop: 4, fontSize: 15, color: COLORS.textPrimary },
   statusRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
   statusLabel: { color: '#6B7280', fontSize: 12 },
   statusValue: { fontWeight: '600', fontSize: 12, color: '#111827', textAlign: 'right', flexShrink: 1 },

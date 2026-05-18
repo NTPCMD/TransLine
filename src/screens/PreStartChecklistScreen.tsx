@@ -3,6 +3,8 @@ import { Alert, StyleSheet, Text, View, Pressable, TextInput, ScrollView } from 
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
+import { useDriver } from '../state/DriverContext';
+import { requestChecklistApproval, type FailedChecklistItem } from '../lib/checklistApproval';
 import type { ScreenProps } from '../types/navigation';
 
 type ChecklistValue = 'pass' | 'fail' | null;
@@ -114,6 +116,7 @@ const checklistSections: ChecklistSection[] = [
 export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChecklist'>) {
   const { navigation } = props;
   const { submitPreStartChecklist, updateAppState } = useAppState();
+  const { currentDriver } = useDriver();
   const vehicleId = props.route.params?.vehicleId ?? null;
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(initialExpandedState);
   const [checklist, setChecklist] = useState<Record<ChecklistKey, ChecklistValue>>({
@@ -194,18 +197,47 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
       return;
     }
 
-    Alert.alert(
-      'Checklist saved',
-      hasFail
-        ? 'Checklist saved locally with issues. You can continue to readings.'
-        : 'Checklist saved locally.'
-    );
-
-    if (hasCriticalFailures) {
-      navigation.navigate('WaitForInstruction');
-    } else {
+    // ── Passing checklist — go directly to odometer/readings ──────────────
+    if (!hasFail) {
       navigation.navigate('ReadingsAndPhotos', { checklistAnswers });
+      return;
     }
+
+    // ── Has failures — request admin approval before continuing ────────────
+    const failedItems: FailedChecklistItem[] = checklistAnswers
+      .filter(a => a.status === 'fail')
+      .map(a => ({
+        id: a.id,
+        label: a.label,
+        note: a.note,
+        critical: a.critical,
+        sectionTitle: a.sectionTitle,
+      }));
+
+    const driverId = currentDriver?.id ?? null;
+    if (!driverId || !vehicleId) {
+      setSubmissionError('Driver or vehicle information is missing. Please restart the flow.');
+      return;
+    }
+
+    setIsSubmitting(true);
+    const { approvalRequestId, error: rpcError } = await requestChecklistApproval({
+      driverId,
+      vehicleId,
+      failedItems,
+    });
+    setIsSubmitting(false);
+
+    if (rpcError || !approvalRequestId) {
+      setSubmissionError(rpcError ?? 'Failed to submit approval request. Please try again.');
+      return;
+    }
+
+    navigation.navigate('ChecklistApproval', {
+      approvalRequestId,
+      vehicleId,
+      failedItems,
+    });
   };
 
   const saveDraft = async () => {

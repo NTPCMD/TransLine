@@ -1,5 +1,12 @@
 import React from 'react';
-import { TouchableOpacity, Text, StyleSheet, ViewStyle } from 'react-native';
+import { Pressable, Text, StyleSheet, ViewStyle } from 'react-native';
+import Animated, {
+  useSharedValue,
+  useAnimatedStyle,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import { SPRING_SNAPPY, TIMING_FAST, COLORS } from '../lib/animations';
 
 interface ButtonProps {
   label: string;
@@ -10,35 +17,87 @@ interface ButtonProps {
 }
 
 export default function Button({ label, onPress, variant = 'primary', disabled, style }: ButtonProps) {
-  const backgroundColor = variant === 'primary' ? '#C62828' : variant === 'secondary' ? '#EEEEEE' : 'transparent';
-  const textColor = variant === 'primary' ? '#FFFFFF' : '#1F2937';
+  const scale = useSharedValue(1);
+  const opacity = useSharedValue(1);
+
+  const animStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+    opacity: opacity.value,
+  }));
+
+  const handlePressIn = () => {
+    if (disabled) return;
+    scale.value = withSpring(0.965, SPRING_SNAPPY);
+    opacity.value = withTiming(0.88, TIMING_FAST);
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1, SPRING_SNAPPY);
+    opacity.value = withTiming(1, TIMING_FAST);
+  };
+
+  const backgroundColor =
+    variant === 'primary' ? COLORS.accent :
+    variant === 'secondary' ? '#EDEFF2' :
+    'transparent';
+
+  const textColor =
+    variant === 'primary' ? '#FFFFFF' :
+    variant === 'ghost' ? COLORS.accent :
+    COLORS.textPrimary;
+
   return (
-    <TouchableOpacity
+    <Pressable
       accessibilityRole="button"
       disabled={disabled}
       onPress={onPress}
-      style={[
-        styles.button,
-        { backgroundColor, opacity: disabled ? 0.6 : 1, borderColor: variant === 'ghost' ? '#C62828' : 'transparent' },
-        style,
-      ]}
+      onPressIn={handlePressIn}
+      onPressOut={handlePressOut}
     >
-      <Text style={[styles.label, { color: variant === 'ghost' ? '#C62828' : textColor }]}>{label}</Text>
-    </TouchableOpacity>
+      <Animated.View
+        style={[
+          styles.button,
+          { backgroundColor },
+          variant === 'primary' && styles.primaryButton,
+          variant === 'ghost' && styles.ghostButton,
+          disabled && styles.disabled,
+          animStyle,
+          style,
+        ]}
+      >
+        <Text style={[styles.label, { color: disabled ? COLORS.textMuted : textColor }]}>{label}</Text>
+      </Animated.View>
+    </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
   button: {
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 13,
+    paddingHorizontal: 18,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
+  },
+  primaryButton: {
+    shadowColor: COLORS.accent,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.22,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  ghostButton: {
+    borderWidth: 1.5,
+    borderColor: COLORS.accent,
+  },
+  disabled: {
+    backgroundColor: '#E5E7EB',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   label: {
     fontWeight: '600',
-    fontSize: 16,
+    fontSize: 15.5,
+    letterSpacing: -0.2,
   },
 });

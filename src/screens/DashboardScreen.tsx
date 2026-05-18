@@ -5,10 +5,14 @@ import Button from '../components/Button';
 import InfoCard from '../components/InfoCard';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
 import ScreenContainer from '../components/ScreenContainer';
+import SkeletonLoader from '../components/SkeletonLoader';
+import StatusChip from '../components/StatusChip';
+import type { ChipStatus } from '../components/StatusChip';
 import { supabase } from '../lib/supabase';
 import { useDriver } from '../state/DriverContext';
 import { useAppState } from '../state/AppStateContext';
 import { useShiftLifecycle } from '../hooks/useShiftLifecycle';
+import { COLORS } from '../lib/animations';
 import type { ScreenProps } from '../types/navigation';
 
 export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
@@ -86,31 +90,52 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
     }
   }, [appState.activeShiftId, isShiftActive]);
 
+  const assignmentChipStatus: ChipStatus =
+    assignmentStatus === 'assigned' ? 'active' :
+    assignmentStatus === 'loading' ? 'loading' :
+    'idle';
+
+  const shiftChipStatus: ChipStatus = isShiftActive ? 'active' : 'idle';
+
   return (
-    <ScreenContainer title="Driver Dashboard" subtitle="Connected to your live Supabase data">
+    <ScreenContainer title="Driver Dashboard" subtitle="Connected to your live data">
       <NetworkStatusBanner />
 
-      <InfoCard title="Driver">
-        <Text style={styles.primaryText}>{loading ? 'Loading driver profile...' : driverName}</Text>
-        <Text style={styles.secondaryText}>User ID: {currentDriver?.user_id ?? currentDriver?.auth_user_id ?? 'Not linked'}</Text>
-        {currentProfile?.email ? <Text style={styles.secondaryText}>Email: {currentProfile.email}</Text> : null}
-      </InfoCard>
+      {loading ? (
+        <SkeletonLoader.Card lines={2} />
+      ) : (
+        <InfoCard title="Driver">
+          <Text style={styles.primaryText}>{driverName}</Text>
+          {currentProfile?.email ? <Text style={styles.secondaryText}>{currentProfile.email}</Text> : null}
+        </InfoCard>
+      )}
 
-      <InfoCard title="Assigned Vehicle">
-        <Text style={styles.primaryText}>{vehicleLabel}</Text>
-        <Text style={styles.secondaryText}>Status: {assignmentStatus}</Text>
-        {assignedVehicle?.type ? <Text style={styles.secondaryText}>Type: {assignedVehicle.type}</Text> : null}
-        {assignedVehicle?.depot ? <Text style={styles.secondaryText}>Depot: {assignedVehicle.depot}</Text> : null}
-      </InfoCard>
+      {assignmentStatus === 'loading' ? (
+        <SkeletonLoader.Card lines={2} />
+      ) : (
+        <InfoCard title="Assigned Vehicle">
+          <View style={styles.rowSpaced}>
+            <Text style={styles.primaryText}>{vehicleLabel}</Text>
+            <StatusChip
+              label={assignmentStatus === 'assigned' ? 'Assigned' : 'Unassigned'}
+              status={assignmentChipStatus}
+            />
+          </View>
+          {assignedVehicle?.type ? <Text style={styles.secondaryText}>{assignedVehicle.type}{assignedVehicle.depot ? ` · ${assignedVehicle.depot}` : ''}</Text> : null}
+        </InfoCard>
+      )}
 
-      <InfoCard title="Shift Lifecycle">
-        <Text style={styles.secondaryText}>Shift ID: {appState.activeShiftId ?? 'No active shift'}</Text>
-        <Text style={styles.secondaryText}>
-          State: {isShiftActive ? 'On shift' : 'Ready to start'}
-        </Text>
+      <InfoCard title="Shift Status">
+        <View style={styles.rowSpaced}>
+          <Text style={styles.primaryText}>{isShiftActive ? 'On shift' : 'Ready to start'}</Text>
+          <StatusChip
+            label={isShiftActive ? 'Active' : 'Idle'}
+            status={shiftChipStatus}
+          />
+        </View>
         {isShiftActive && appState.shiftStartTime ? (
           <Text style={styles.secondaryText}>
-            Started: {formatPerthDateTime(appState.shiftStartTime)}
+            Started {formatPerthDateTime(appState.shiftStartTime)}
           </Text>
         ) : null}
       </InfoCard>
@@ -129,7 +154,7 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
       )}
 
       <Button
-        label={isRefreshing ? 'Refreshing...' : 'Refresh Data'}
+        label={isRefreshing ? 'Refreshing…' : 'Refresh Data'}
         variant="ghost"
         onPress={handleRefresh}
         disabled={isRefreshing}
@@ -142,13 +167,21 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
 
 const styles = StyleSheet.create({
   primaryText: {
-    color: '#111827',
-    fontSize: 18,
+    color: COLORS.textPrimary,
+    fontSize: 17,
     fontWeight: '700',
+    letterSpacing: -0.3,
   },
   secondaryText: {
-    color: '#4B5563',
-    marginTop: 4,
+    color: COLORS.textSecondary,
+    marginTop: 2,
+    fontSize: 13.5,
+  },
+  rowSpaced: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
   },
   buttonGroup: {
     gap: 10,
