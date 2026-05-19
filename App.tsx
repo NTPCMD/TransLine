@@ -1,3 +1,4 @@
+import 'react-native-url-polyfill/auto';
 import 'react-native-gesture-handler';
 import 'react-native-reanimated';
 import React, { useCallback, useEffect, useRef } from 'react';
