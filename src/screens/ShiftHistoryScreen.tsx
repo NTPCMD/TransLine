@@ -12,7 +12,6 @@ import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useDriver } from '../state/DriverContext';
 import { supabase } from '../lib/supabase';
-import type { ScreenProps } from '../types/navigation';
 
 interface Shift {
   id: string;
@@ -24,7 +23,15 @@ interface Shift {
   vehicle_registration?: string;
 }
 
-export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
+interface ShiftHistoryScreenProps {
+  navigation: {
+    canGoBack(): boolean;
+    goBack(): void;
+    navigate(route: 'Dashboard'): void;
+  };
+}
+
+export default function ShiftHistoryScreen(props: ShiftHistoryScreenProps) {
   const { navigation } = props;
   const { authUserId } = useDriver();
   const [shifts, setShifts] = useState<Shift[]>([]);
@@ -47,7 +54,7 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
           status,
           started_at,
           ended_at,
-          vehicles!inner(registration)
+          vehicles!inner(rego)
         `)
         .eq('driver_id', authUserId)
         .order('started_at', { ascending: false })
@@ -59,7 +66,7 @@ export default function ShiftHistoryScreen(props: ScreenProps<'ShiftHistory'>) {
         // Transform the data to flatten vehicle registration
         const transformedData = (data || []).map((shift: any) => ({
           ...shift,
-          vehicle_registration: shift.vehicles?.registration || 'Unknown',
+          vehicle_registration: shift.vehicles?.rego || 'Unknown',
         }));
         setShifts(transformedData);
       }

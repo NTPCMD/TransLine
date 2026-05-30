@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 import * as Location from 'expo-location';
 import ScreenContainer from '../components/ScreenContainer';
 import TextField from '../components/TextField';
@@ -244,34 +244,58 @@ export default function IncidentReportScreen(props: ScreenProps<'IncidentReport'
 
   const label = gpsLabel();
 
+  const renderCategoryButton = (option: (typeof categoryOptions)[number]) => {
+    const selected = category === option.value;
+    return (
+      <Pressable
+        key={option.value}
+        accessibilityRole="button"
+        onPress={() => setCategory(option.value)}
+        style={[styles.categoryButton, selected ? styles.categoryButtonActive : styles.categoryButtonInactive]}
+      >
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit={false}
+          style={[styles.choiceLabel, selected ? styles.choiceLabelActive : styles.choiceLabelInactive]}
+        >
+          {option.label}
+        </Text>
+      </Pressable>
+    );
+  };
+
+  const renderSeverityButton = (option: (typeof severityOptions)[number]) => {
+    const selected = severity === option.value;
+    return (
+      <Pressable
+        key={option.value}
+        accessibilityRole="button"
+        onPress={() => setSeverity(option.value)}
+        style={[styles.severityChoice, selected ? styles.severityChoiceActive : styles.severityChoiceInactive]}
+      >
+        <Text
+          numberOfLines={1}
+          adjustsFontSizeToFit={false}
+          style={[styles.choiceLabel, selected ? styles.choiceLabelActive : styles.choiceLabelInactive]}
+        >
+          {option.label}
+        </Text>
+      </Pressable>
+    );
+  };
+
   return (
     <ScreenContainer title="Incident report" subtitle="Log an incident for operations">
       <View style={styles.severityContainer}>
         <Text style={styles.severityLabel}>Category</Text>
-        <View style={styles.titleRow}>
-          {categoryOptions.map(option => (
-            <Button
-              key={option.value}
-              label={option.label}
-              variant={category === option.value ? 'primary' : 'secondary'}
-              onPress={() => setCategory(option.value)}
-              style={styles.titleButton}
-            />
-          ))}
+        <View style={styles.categoryRow}>
+          {categoryOptions.map(renderCategoryButton)}
         </View>
         {attemptedSubmit && !category ? <Text style={styles.errorText}>Category is required.</Text> : null}
 
         <Text style={[styles.severityLabel, { marginTop: 8 }]}>Severity</Text>
         <View style={styles.severityRow}>
-          {severityOptions.map(option => (
-            <Button
-              key={option.value}
-              label={option.label}
-              variant={severity === option.value ? 'primary' : 'secondary'}
-              onPress={() => setSeverity(option.value)}
-              style={styles.severityButton}
-            />
-          ))}
+          {severityOptions.map(renderSeverityButton)}
         </View>
         {attemptedSubmit && !severity ? <Text style={styles.errorText}>Severity is required.</Text> : null}
       </View>
@@ -339,22 +363,65 @@ const styles = StyleSheet.create({
   },
   severityRow: {
     flexDirection: 'row',
-    gap: 8,
-  },
-  severityButton: {
-    flex: 1,
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 12,
   },
   titleContainer: {
     width: '100%',
     marginBottom: 12,
   },
-  titleRow: {
+  categoryRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    justifyContent: 'space-between',
+    rowGap: 12,
   },
-  titleButton: {
+  categoryButton: {
     width: '48%',
+    minHeight: 56,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    borderWidth: 1,
+  },
+  categoryButtonActive: {
+    backgroundColor: '#C62828',
+    borderColor: '#C62828',
+  },
+  categoryButtonInactive: {
+    backgroundColor: '#EDEFF2',
+    borderColor: '#D1D5DB',
+  },
+  severityChoice: {
+    width: '31.5%',
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    borderWidth: 1,
+  },
+  severityChoiceActive: {
+    backgroundColor: '#C62828',
+    borderColor: '#C62828',
+  },
+  severityChoiceInactive: {
+    backgroundColor: '#EDEFF2',
+    borderColor: '#D1D5DB',
+  },
+  choiceLabel: {
+    fontSize: 15,
+    fontWeight: '600',
+    textAlign: 'center',
+    flexShrink: 0,
+  },
+  choiceLabelActive: {
+    color: '#FFFFFF',
+  },
+  choiceLabelInactive: {
+    color: '#111827',
   },
   gpsRow: {
     marginTop: 8,

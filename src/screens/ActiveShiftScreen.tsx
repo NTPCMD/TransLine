@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { formatPerthTime } from '../lib/formatPerthDateTime';
-import { Modal, Pressable, SafeAreaView, StyleSheet, Text, View, TouchableOpacity } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withRepeat, withSequence, withTiming, withSpring } from 'react-native-reanimated';
 import { SPRING_SMOOTH, TIMING_MED, COLORS } from '../lib/animations';
 import * as Location from 'expo-location';
@@ -30,15 +30,6 @@ const haversineDistanceMeters = (latA: number, lonA: number, latB: number, lonB:
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 };
 
-const MENU_ITEMS = [
-  { label: 'Announcements', screen: 'Announcements' },
-  { label: 'Medical Absence', screen: 'MedicalAbsence' },
-  { label: 'Vehicle Maintenance', screen: 'VehicleMaintenanceLog' },
-  { label: 'Profile', screen: 'Profile' },
-  { label: 'Shift History', screen: 'ShiftHistory' },
-  { label: 'Operations Alerts', screen: 'OperationsAlerts' },
-] as const;
-
 const NAV_BUTTONS = [
   ['Break', 'BreakControl'],
   ['Fuel Log', 'FuelLog'],
@@ -58,13 +49,11 @@ function ActiveBanner({
   vehicleLabel,
   shiftDuration,
   isTracking,
-  onMenuPress,
 }: {
   driverName: string;
   vehicleLabel: string;
   shiftDuration: string;
   isTracking: boolean;
-  onMenuPress: () => void;
 }) {
   const dotScale = useSharedValue(1);
   const dotOpacity = useSharedValue(1);
@@ -97,9 +86,6 @@ function ActiveBanner({
             <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5 }}>{driverName} • {vehicleLabel}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={onMenuPress} style={styles.menuButton}>
-          <Text style={{ color: '#fff', fontWeight: '600', fontSize: 14 }}>Menu</Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.metricsRow}>
@@ -119,7 +105,6 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   const { currentDriver: driver, currentVehicle: assigned } = useDriver();
   const { shift: activeShift, status: activeShiftStatus, reload: reloadActiveShift } = useActiveShift();
 
-  const [menuVisible, setMenuVisible] = useState(false);
   const [now, setNow] = useState(Date.now()); // ticks every second to keep countdowns live
   const [hasLocationFix, setHasLocationFix] = useState(false);
   const [driverCoordinate, setDriverCoordinate] = useState<[number, number] | null>(null);
@@ -139,7 +124,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
 
   // Vehicle label resolution
   const finalVehicleLabel = useMemo(
-    () => state.vehicleRegistration ?? assigned?.registration ?? assigned?.rego ?? assigned?.plate_number ?? 'No vehicle',
+    () => state.vehicleRegistration ?? assigned?.rego ?? assigned?.plate_number ?? 'No vehicle',
     [state.vehicleRegistration, assigned]
   );
   const shiftVehicleId = state.activeShiftVehicleId ?? state.vehicleId ?? null;
@@ -382,27 +367,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
         vehicleLabel={finalVehicleLabel}
         shiftDuration={getShiftDuration()}
         isTracking={isPolling}
-        onMenuPress={() => setMenuVisible(true)}
       />
-
-      <Modal visible={menuVisible} transparent animationType="none" onRequestClose={() => setMenuVisible(false)}>
-        <Pressable style={styles.menuOverlay} onPress={() => setMenuVisible(false)}>
-          <Animated.View style={styles.menuPanel}>
-            <SafeAreaView>
-              <View style={styles.menuHandle} />
-              <Text style={styles.menuTitle}>Navigation</Text>
-              {MENU_ITEMS.map(({ label, screen }) => (
-                <TouchableOpacity key={screen} style={styles.menuItem} onPress={() => { setMenuVisible(false); navigation.navigate(screen as any); }}>
-                  <Text style={styles.menuItemText}>{label}</Text>
-                </TouchableOpacity>
-              ))}
-              <TouchableOpacity style={[styles.menuItem, styles.menuItemClose]} onPress={() => setMenuVisible(false)}>
-                <Text style={[styles.menuItemText, { color: COLORS.textMuted }]}>Close</Text>
-              </TouchableOpacity>
-            </SafeAreaView>
-          </Animated.View>
-        </Pressable>
-      </Modal>
 
       <View style={{ padding: 16 }}>
         {hasShiftVehicleConflict && (
@@ -463,14 +428,6 @@ const styles = StyleSheet.create({
   bannerLeft: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   dot: { width: 9, height: 9, borderRadius: 4.5, backgroundColor: '#fff' },
   bannerText: { color: '#fff', fontWeight: '700', fontSize: 15, letterSpacing: 0.5 },
-  menuButton: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.18)' },
-  menuOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  menuHandle: { width: 36, height: 4, borderRadius: 2, backgroundColor: '#E5E7EB', alignSelf: 'center', marginBottom: 14 },
-  menuPanel: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingHorizontal: 20, paddingBottom: 8, paddingTop: 16 },
-  menuTitle: { fontSize: 13, fontWeight: '700', color: COLORS.textMuted, marginBottom: 8, letterSpacing: 0.6, textTransform: 'uppercase' },
-  menuItem: { paddingVertical: 15, borderBottomWidth: 1, borderBottomColor: '#F3F4F6' },
-  menuItemClose: { borderBottomWidth: 0, marginTop: 8, alignItems: 'center', paddingBottom: 8 },
-  menuItemText: { fontSize: 16, color: COLORS.textPrimary, fontWeight: '500' },
   metricsRow: { backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: COLORS.border, paddingVertical: 12, paddingHorizontal: 8, flexDirection: 'row', justifyContent: 'space-around' },
   metricItem: { alignItems: 'center', flex: 1 },
   metricLabel: { color: COLORS.textMuted, fontSize: 11, fontWeight: '500', letterSpacing: 0.4, textTransform: 'uppercase' },

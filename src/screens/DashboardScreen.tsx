@@ -38,7 +38,6 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
   }, [currentDriver?.name, currentProfile?.full_name]);
 
   const vehicleLabel =
-    assignedVehicle?.registration ??
     assignedVehicle?.rego ??
     assignedVehicle?.plate_number ??
     appState.vehicleRegistration ??
@@ -159,7 +158,6 @@ export default function DashboardScreen(props: ScreenProps<'Dashboard'>) {
         onPress={handleRefresh}
         disabled={isRefreshing}
       />
-      <Button label="Profile" variant="ghost" onPress={() => navigation.navigate('Profile')} />
       <Button label="Sign Out" variant="ghost" onPress={handleSignOut} />
     </ScreenContainer>
   );

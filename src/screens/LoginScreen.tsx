@@ -142,7 +142,6 @@ export default function LoginScreen(props: ScreenProps<'Login'>) {
         driverRecordId: driverId,
         vehicleId: assignmentResult.vehicle?.id ?? null,
         vehicleRegistration:
-          assignmentResult.vehicle?.registration ??
           assignmentResult.vehicle?.rego ??
           assignmentResult.vehicle?.plate_number ??
           null,

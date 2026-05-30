@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, StyleSheet, Text, View } from 'react-native';
 import * as Location from 'expo-location';
 import ScreenContainer from '../components/ScreenContainer';
@@ -31,6 +31,26 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [gps, setGps] = useState<GpsCaptureState>({ status: 'idle' });
+  const [shiftStartKm, setShiftStartKm] = useState<number | null>(null);
+  const [vehicleLastKnownKm, setVehicleLastKnownKm] = useState<number | null>(null);
+  const [isLoadingOdometerBounds, setIsLoadingOdometerBounds] = useState(false);
+  const [odometerBoundsError, setOdometerBoundsError] = useState<string | null>(null);
+
+  const parseOdometerKm = useCallback((metadata: unknown): number | null => {
+    if (!metadata || typeof metadata !== 'object') return null;
+
+    const record = metadata as Record<string, unknown>;
+    const rawValue = record.odometer_value;
+    const value =
+      typeof rawValue === 'number'
+        ? rawValue
+        : typeof rawValue === 'string'
+          ? Number(rawValue)
+          : NaN;
+
+    if (!Number.isFinite(value)) return null;
+    return value;
+  }, []);
 
   const captureGps = useCallback(async (): Promise<ReadyGps | null> => {
     setGps({ status: 'fetching' });
@@ -80,7 +100,7 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
     void captureGps();
   }, [captureGps]);
 
-  const resolveActiveShiftForFuelLog = async (authUserId: string) => {
+  const resolveActiveShiftForFuelLog = useCallback(async (authUserId: string) => {
     if (state.activeShiftId) {
       return {
         shiftId: state.activeShiftId,
@@ -149,7 +169,133 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
       driverId,
       vehicleId: activeShift.vehicle_id ?? state.activeShiftVehicleId ?? state.vehicleId ?? null,
     };
-  };
+  }, [state.activeShiftId, state.activeShiftVehicleId, state.driverRecordId, state.vehicleId, updateAppState]);
+
+  const loadOdometerBounds = useCallback(async () => {
+    setIsLoadingOdometerBounds(true);
+    setOdometerBoundsError(null);
+
+    try {
+      const { data: authData, error: authError } = await supabase.auth.getUser();
+      if (authError || !authData?.user?.id) {
+        setOdometerBoundsError('User not available.');
+        return;
+      }
+
+      const { shiftId, vehicleId, error: shiftResolveError } = await resolveActiveShiftForFuelLog(authData.user.id);
+      if (!shiftId) {
+        setOdometerBoundsError(shiftResolveError ?? 'No active shift found.');
+        return;
+      }
+
+      const [shiftStartResult, metadataVehicleResult, shiftVehicleResult] = await Promise.all([
+        supabase
+          .from('shift_events')
+          .select('event_type, created_at, metadata')
+          .eq('shift_id', shiftId)
+          .in('event_type', ['odometer_start', 'shift_start'])
+          .order('created_at', { ascending: true }),
+        vehicleId
+          ? supabase
+              .from('shift_events')
+              .select('id, created_at, metadata')
+              .in('event_type', ['odometer_start', 'odometer_end'])
+              .eq('metadata->>vehicle_id', vehicleId)
+              .order('created_at', { ascending: false })
+              .limit(20)
+          : Promise.resolve({ data: [], error: null }),
+        vehicleId
+          ? supabase
+              .from('shift_events')
+              .select('id, created_at, metadata, shifts!inner(vehicle_id)')
+              .in('event_type', ['odometer_start', 'odometer_end'])
+              .eq('shifts.vehicle_id', vehicleId)
+              .order('created_at', { ascending: false })
+              .limit(20)
+          : Promise.resolve({ data: [], error: null }),
+      ]);
+
+      if (shiftStartResult.error) {
+        setOdometerBoundsError(`Unable to load shift start odometer: ${shiftStartResult.error.message}`);
+        return;
+      }
+
+      if (metadataVehicleResult.error) {
+        setOdometerBoundsError(`Unable to load vehicle odometer: ${metadataVehicleResult.error.message}`);
+        return;
+      }
+
+      if (shiftVehicleResult.error) {
+        setOdometerBoundsError(`Unable to load vehicle odometer: ${shiftVehicleResult.error.message}`);
+        return;
+      }
+
+      const shiftStartEvent = (shiftStartResult.data ?? []).find((event) => event.event_type === 'odometer_start')
+        ?? (shiftStartResult.data ?? []).find((event) => event.event_type === 'shift_start');
+      const loadedShiftStartKm = parseOdometerKm(shiftStartEvent?.metadata ?? null);
+      const fallbackStateStartKm = Number(state.odometerReading);
+      const resolvedShiftStartKm =
+        loadedShiftStartKm !== null
+          ? loadedShiftStartKm
+          : Number.isFinite(fallbackStateStartKm) && fallbackStateStartKm > 0
+            ? fallbackStateStartKm
+            : null;
+
+      const mergedVehicleRows = [
+        ...((metadataVehicleResult.data ?? []) as Array<{ id?: string; created_at: string; metadata: unknown }>),
+        ...((shiftVehicleResult.data ?? []) as Array<{ id?: string; created_at: string; metadata: unknown }>),
+      ];
+      const dedupedVehicleRows = new Map<string, { created_at: string; metadata: unknown }>();
+      for (const row of mergedVehicleRows) {
+        const key = row.id ?? `${row.created_at}:${JSON.stringify(row.metadata)}`;
+        if (!dedupedVehicleRows.has(key)) {
+          dedupedVehicleRows.set(key, { created_at: row.created_at, metadata: row.metadata });
+        }
+      }
+      const sortedVehicleRows = Array.from(dedupedVehicleRows.values()).sort(
+        (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+      );
+
+      let resolvedVehicleLastKnownKm: number | null = null;
+      for (const row of sortedVehicleRows) {
+        const parsed = parseOdometerKm(row.metadata);
+        if (parsed !== null) {
+          resolvedVehicleLastKnownKm = parsed;
+          break;
+        }
+      }
+
+      setShiftStartKm(resolvedShiftStartKm);
+      setVehicleLastKnownKm(resolvedVehicleLastKnownKm);
+
+      console.log('[FuelLog] shiftStartKm', { shiftStartKm: resolvedShiftStartKm });
+      console.log('[FuelLog] vehicleLastKnownKm', { vehicleLastKnownKm: resolvedVehicleLastKnownKm });
+      console.log('[FuelLog] minFuelOdometer', {
+        minFuelOdometer:
+          resolvedShiftStartKm !== null || resolvedVehicleLastKnownKm !== null
+            ? Math.max(resolvedShiftStartKm ?? 0, resolvedVehicleLastKnownKm ?? 0)
+            : null,
+      });
+    } finally {
+      setIsLoadingOdometerBounds(false);
+    }
+  }, [parseOdometerKm, resolveActiveShiftForFuelLog, state.odometerReading]);
+
+  useEffect(() => {
+    void loadOdometerBounds();
+  }, [loadOdometerBounds]);
+
+  const enteredOdometer = useMemo(() => Number(odometerKm), [odometerKm]);
+  const minFuelOdometer = useMemo(() => {
+    if (shiftStartKm === null && vehicleLastKnownKm === null) return null;
+    return Math.max(shiftStartKm ?? 0, vehicleLastKnownKm ?? 0);
+  }, [shiftStartKm, vehicleLastKnownKm]);
+
+  const odometerIsNumeric = odometerKm.trim().length > 0 && Number.isFinite(enteredOdometer);
+  const odometerGreaterThanZero = odometerIsNumeric && enteredOdometer > 0;
+  const odometerAtOrAboveMinimum =
+    odometerGreaterThanZero && (minFuelOdometer === null || enteredOdometer >= minFuelOdometer);
+  const odometerIsValid = odometerAtOrAboveMinimum && !isLoadingOdometerBounds && !odometerBoundsError;
 
   const submitFuel = async () => {
     setAttemptedSubmit(true);
@@ -178,7 +324,22 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
       return;
     }
     const odometerNum = Number(odometerKm);
-    if (!Number.isFinite(odometerNum) || odometerNum < 0) {
+    if (!Number.isFinite(odometerNum) || odometerNum <= 0) {
+      return;
+    }
+
+    console.log('[FuelLog] shiftStartKm', { shiftStartKm });
+    console.log('[FuelLog] vehicleLastKnownKm', { vehicleLastKnownKm });
+    console.log('[FuelLog] minFuelOdometer', { minFuelOdometer });
+    console.log('[FuelLog] enteredOdometer', { enteredOdometer: odometerNum });
+
+    if (odometerBoundsError) {
+      setSubmitError(odometerBoundsError);
+      return;
+    }
+
+    if (minFuelOdometer !== null && odometerNum < minFuelOdometer) {
+      setSubmitError('Odometer cannot be less than the starting or last known odometer.');
       return;
     }
 
@@ -343,9 +504,15 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
       {attemptedSubmit && odometerKm.trim() && !Number.isFinite(Number(odometerKm)) && (
         <Text style={styles.errorText}>Odometer must be a valid number.</Text>
       )}
-      {attemptedSubmit && odometerKm.trim() && Number.isFinite(Number(odometerKm)) && Number(odometerKm) < 0 && (
-        <Text style={styles.errorText}>Odometer cannot be negative.</Text>
+      {attemptedSubmit && odometerKm.trim() && Number.isFinite(Number(odometerKm)) && Number(odometerKm) <= 0 && (
+        <Text style={styles.errorText}>Odometer must be greater than 0.</Text>
       )}
+      {attemptedSubmit && odometerKm.trim() && Number.isFinite(Number(odometerKm)) && Number(odometerKm) > 0 && minFuelOdometer !== null && Number(odometerKm) < minFuelOdometer && (
+        <Text style={styles.errorText}>Odometer cannot be less than the starting or last known odometer.</Text>
+      )}
+      {attemptedSubmit && odometerBoundsError ? (
+        <Text style={styles.errorText}>{odometerBoundsError}</Text>
+      ) : null}
 
       {attemptedSubmit && !location.trim() && (
         <Text style={styles.errorText}>Location (fuel station) is required.</Text>
@@ -380,7 +547,7 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
       <Button
         label={isSubmitting ? 'Saving…' : 'Submit'}
         onPress={submitFuel}
-        disabled={isSubmitting}
+        disabled={isSubmitting || !odometerIsValid}
       />
       <Button label="Cancel" variant="ghost" onPress={() => navigation.goBack()} disabled={isSubmitting} />
     </ScreenContainer>

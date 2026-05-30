@@ -35,14 +35,8 @@ import BreakControlScreen from './src/screens/BreakControlScreen';
 import FuelLogScreen from './src/screens/FuelLogScreen';
 import IncidentReportScreen from './src/screens/IncidentReportScreen';
 import EndShiftScreen from './src/screens/EndShiftScreen';
-import MedicalAbsenceScreen from './src/screens/MedicalAbsenceScreen';
-import AnnouncementsScreen from './src/screens/AnnouncementsScreen';
-import OperationsAlertsScreen from './src/screens/OperationsAlertsScreen';
 import ComponentsLibraryScreen from './src/screens/ComponentsLibraryScreen';
-import VehicleMaintenanceLogScreen from './src/screens/VehicleMaintenanceLogScreen';
 import OfflineQueueScreen from './src/screens/OfflineQueueScreen';
-import ProfileScreen from './src/screens/ProfileScreen';
-import ShiftHistoryScreen from './src/screens/ShiftHistoryScreen';
 import OdometerCaptureScreen from './src/screens/OdometerCaptureScreen';
 import ChecklistApprovalScreen from './src/screens/ChecklistApprovalScreen';
 
@@ -64,19 +58,10 @@ function MainDrawer() {
       <Drawer.Screen name="ShiftDetails" component={ShiftDetailsScreen as any} />
       <Drawer.Screen name="FuelLog" component={FuelLogScreen as any} />
       <Drawer.Screen name="IncidentReport" component={IncidentReportScreen as any} />
-      <Drawer.Screen name="MedicalAbsence" component={MedicalAbsenceScreen as any} />
-      <Drawer.Screen name="Announcements" component={AnnouncementsScreen as any} />
-      <Drawer.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen as any} />
       <Drawer.Screen
         name="OfflineQueue"
         component={OfflineQueueScreen}
         options={{ title: 'Offline Queue' }}
-      />
-      <Drawer.Screen name="Profile" component={ProfileScreen as any} options={{ title: 'Profile' }} />
-      <Drawer.Screen
-        name="ShiftHistory"
-        component={ShiftHistoryScreen as any}
-        options={{ title: 'Shift History' }}
       />
     </Drawer.Navigator>
   );
@@ -108,14 +93,11 @@ function RootNavigator() {
       <Stack.Screen name="FuelLog" component={FuelLogScreen as any} />
       <Stack.Screen name="IncidentReport" component={IncidentReportScreen as any} />
       <Stack.Screen name="EndShift" component={EndShiftScreen as any} />
-      <Stack.Screen name="MedicalAbsence" component={MedicalAbsenceScreen as any} />
-      <Stack.Screen name="Announcements" component={AnnouncementsScreen as any} />
-      <Stack.Screen name="OperationsAlerts" component={OperationsAlertsScreen as any} />
+      {/* Menu pages removed on 2026-05-30: Announcements, Medical Absence,
+          Vehicle Maintenance, Profile, Operations Alerts. Re-register routes
+          here if these screens are needed again in the future. */}
       <Stack.Screen name="ComponentsLibrary" component={ComponentsLibraryScreen as any} />
-      <Stack.Screen name="VehicleMaintenanceLog" component={VehicleMaintenanceLogScreen as any} />
       <Stack.Screen name="OfflineQueue" component={OfflineQueueScreen} />
-      <Stack.Screen name="Profile" component={ProfileScreen as any} />
-      <Stack.Screen name="ShiftHistory" component={ShiftHistoryScreen as any} />
       <Stack.Screen name="OdometerCapture" component={OdometerCaptureScreen} />
       <Stack.Screen name="ChecklistApproval" component={ChecklistApprovalScreen as any} />
     </Stack.Navigator>

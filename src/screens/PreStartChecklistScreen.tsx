@@ -4,7 +4,11 @@ import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import { useAppState } from '../state/AppStateContext';
 import { useDriver } from '../state/DriverContext';
-import { requestChecklistApproval, type FailedChecklistItem } from '../lib/checklistApproval';
+import {
+  requestChecklistApproval,
+  type FailedChecklistItem,
+  type ChecklistApprovalItem,
+} from '../lib/checklistApproval';
 import type { ScreenProps } from '../types/navigation';
 
 type ChecklistValue = 'pass' | 'fail' | null;
@@ -204,6 +208,15 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
     }
 
     // ── Has failures — request admin approval before continuing ────────────
+    const fullChecklist: ChecklistApprovalItem[] = checklistAnswers.map(a => ({
+      id: a.id,
+      label: a.label,
+      status: a.status === 'fail' ? 'fail' : 'pass',
+      note: a.note,
+      critical: a.critical,
+      sectionTitle: a.sectionTitle,
+    }));
+
     const failedItems: FailedChecklistItem[] = checklistAnswers
       .filter(a => a.status === 'fail')
       .map(a => ({
@@ -225,6 +238,7 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
       driverId,
       vehicleId,
       failedItems,
+      checklist: fullChecklist,
     });
     setIsSubmitting(false);
 
@@ -237,6 +251,7 @@ export default function PreStartChecklistScreen(props: ScreenProps<'PreStartChec
       approvalRequestId,
       vehicleId,
       failedItems,
+      checklistAnswers,
     });
   };
 

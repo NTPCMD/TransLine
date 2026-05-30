@@ -3,6 +3,7 @@ import { ActivityIndicator, ScrollView, StyleSheet, Text, TouchableOpacity, View
 import ScreenContainer from '../components/ScreenContainer';
 import Button from '../components/Button';
 import NetworkStatusBanner from '../components/NetworkStatusBanner';
+import { useAppState } from '../state/AppStateContext';
 import { fetchChecklistApprovalStatus, type ApprovalStatus, type ChecklistApprovalRecord } from '../lib/checklistApproval';
 import { formatPerthDateTime } from '../lib/formatPerthDateTime';
 import type { ScreenProps } from '../types/navigation';
@@ -11,7 +12,8 @@ const POLL_INTERVAL_MS = 12_000;
 
 export default function ChecklistApprovalScreen(props: ScreenProps<'ChecklistApproval'>) {
   const { navigation, route } = props;
-  const { approvalRequestId, vehicleId, failedItems } = route.params;
+  const { updateAppState } = useAppState();
+  const { approvalRequestId, vehicleId, failedItems, checklistAnswers } = route.params;
 
   const [record, setRecord] = useState<ChecklistApprovalRecord | null>(null);
   const [loading, setLoading] = useState(true);
@@ -56,22 +58,25 @@ export default function ChecklistApprovalScreen(props: ScreenProps<'ChecklistApp
         pollTimer.current = null;
       }
     }
-  }, [record?.status]);
+    // Log when approval is granted
+    if (record?.status === 'approved') {
+      console.log('[ApprovalResume] approved', { approvalRequestId, vehicleId });
+      console.log('[ApprovalResume] checklistAnswers present', { count: checklistAnswers?.length ?? 0 });
+    }
+  }, [record?.status, approvalRequestId, vehicleId, checklistAnswers?.length]);
 
   const status: ApprovalStatus = record?.status ?? 'pending';
 
   const handleContinue = () => {
-    // Navigate to ReadingsAndPhotos — the checklist answers are already in
-    // AppState from when the checklist was submitted.
+    // Navigate to ReadingsAndPhotos — preserving the full checklist answers
+    console.log('[ApprovalResume] navigating to ReadingsAndPhotos', { approvalRequestId, vehicleId });
+    updateAppState({
+      checklistSubmitted: true,
+      checklistCompleted: true,
+      preStartChecklistAnswers: checklistAnswers,
+    });
     navigation.navigate('ReadingsAndPhotos', {
-      checklistAnswers: failedItems.map(item => ({
-        id: item.id,
-        label: item.label,
-        status: 'fail' as const,
-        note: item.note,
-        critical: item.critical,
-        sectionTitle: item.sectionTitle,
-      })),
+      checklistAnswers: checklistAnswers,
     });
   };
 

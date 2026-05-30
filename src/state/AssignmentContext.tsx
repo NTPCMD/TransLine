@@ -13,7 +13,6 @@ export interface VehicleAssignment {
 
 export interface AssignedVehicle {
   id: string;
-  registration?: string | null;
   rego?: string | null;
   plate_number?: string | null;
   make?: string | null;
@@ -49,7 +48,6 @@ export function AssignmentProvider({ children }: { children: React.ReactNode }) 
   const vehicle = assignmentState.vehicle
     ? {
         id: assignmentState.vehicle.id,
-        registration: assignmentState.vehicle.registration ?? null,
         rego: assignmentState.vehicle.rego ?? null,
         plate_number: assignmentState.vehicle.plate_number ?? null,
         make: assignmentState.vehicle.make ?? null,

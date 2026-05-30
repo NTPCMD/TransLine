@@ -74,3 +74,31 @@ export async function logIdleEvent(params: {
   }
   return { ok: true };
 }
+
+/**
+ * Start a break via RPC.
+ */
+export async function startBreak(params: {
+  p_shift_id: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.rpc('start_break', params);
+  if (error) {
+    console.error('[shiftLifecycle] start_break RPC error:', error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}
+
+/**
+ * End a break via RPC.
+ */
+export async function endBreak(params: {
+  p_shift_id: string;
+}): Promise<{ ok: boolean; error?: string }> {
+  const { error } = await supabase.rpc('end_break', params);
+  if (error) {
+    console.error('[shiftLifecycle] end_break RPC error:', error.message);
+    return { ok: false, error: error.message };
+  }
+  return { ok: true };
+}

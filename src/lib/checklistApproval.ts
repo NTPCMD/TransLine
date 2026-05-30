@@ -17,6 +17,15 @@ export interface FailedChecklistItem {
   sectionTitle: string;
 }
 
+export interface ChecklistApprovalItem {
+  id: string;
+  label: string;
+  status: 'pass' | 'fail';
+  note: string;
+  critical: boolean;
+  sectionTitle: string;
+}
+
 /**
  * Calls the request_checklist_approval RPC.
  * Returns the approval request id on success or an error string.
@@ -24,24 +33,27 @@ export interface FailedChecklistItem {
  * The RPC is expected to:
  *  - Be idempotent: return an existing pending request for the same
  *    driver/vehicle/shift_date combination instead of creating a duplicate.
- *  - Accept: driver_id, vehicle_id, failed_items (jsonb[])
+ *  - Accept: driver_id, vehicle_id, failed_items (jsonb[]), checklist (jsonb[])
  *  - Return: { id: uuid }
  */
 export async function requestChecklistApproval(params: {
   driverId: string;
   vehicleId: string;
   failedItems: FailedChecklistItem[];
+  checklist: ChecklistApprovalItem[];
 }): Promise<{ approvalRequestId: string | null; error: string | null }> {
   console.log('[ChecklistApproval] requestChecklistApproval:start', {
     driverId: params.driverId,
     vehicleId: params.vehicleId,
     failedCount: params.failedItems.length,
+    checklistCount: params.checklist.length,
   });
 
   const { data, error } = await supabase.rpc('request_checklist_approval', {
     p_driver_id: params.driverId,
     p_vehicle_id: params.vehicleId,
     p_failed_items: params.failedItems,
+    p_checklist: params.checklist,
   });
 
   if (error) {

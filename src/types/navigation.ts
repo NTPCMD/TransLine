@@ -19,6 +19,14 @@ export type RootStackParamList = {
       critical: boolean;
       sectionTitle: string;
     }>;
+    checklistAnswers: Array<{
+      id: string;
+      label: string;
+      status: 'pass' | 'fail' | null;
+      note: string;
+      critical: boolean;
+      sectionTitle: string;
+    }>;
   };
   WaitForInstruction: undefined;
   ReadingsAndPhotos: {
@@ -38,14 +46,8 @@ export type RootStackParamList = {
   FuelLog: undefined;
   IncidentReport: undefined;
   EndShift: undefined;
-  MedicalAbsence: undefined;
-  Announcements: undefined;
-  OperationsAlerts: undefined;
   ComponentsLibrary: undefined;
-  VehicleMaintenanceLog: undefined;
   OfflineQueue: undefined;
-  Profile: undefined;
-  ShiftHistory: undefined;
   OdometerCapture: {
     kind?: 'start' | 'mid' | 'end';
     shiftId?: string;

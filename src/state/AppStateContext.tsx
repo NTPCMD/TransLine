@@ -1,4 +1,4 @@
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Location from 'expo-location';
 import { supabase } from '../lib/supabase';
@@ -8,8 +8,13 @@ import { getAssignedVehicleForCurrentUser } from '../lib/assignment';
 import { getGpsFix } from '../lib/locationEvents';
 import { networkMonitor } from '../lib/networkMonitor';
 import { offlineQueue } from '../lib/offlineQueue';
-import { startShift as rpcStartShift, endShift as rpcEndShift } from '../lib/shiftLifecycle';
+import {
+  startShift as rpcStartShift,
+  endShift as rpcEndShift,
+  endBreak as rpcEndBreak,
+} from '../lib/shiftLifecycle';
 import { uploadShiftPhoto } from '../lib/photoUpload';
+import { summarizeBreakAllowance } from '../lib/breakAllowance';
 
 export interface VehicleInfo {
   id: string | null;
@@ -127,7 +132,7 @@ type EventQueueItem = {
   };
 };
 
-const ALLOWED_RPC_NAMES = ['start_shift', 'end_shift', 'log_idle_event'] as const;
+const ALLOWED_RPC_NAMES = ['start_shift', 'end_shift', 'log_idle_event', 'start_break', 'end_break'] as const;
 type AllowedRpcName = typeof ALLOWED_RPC_NAMES[number];
 
 type RpcQueuedWrite = {
@@ -180,6 +185,8 @@ const initialState: AppState = {
 
 export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(initialState);
+  const recentEventSubmissions = useRef<Map<string, number>>(new Map());
+  const pendingEventSubmissions = useRef<Set<string>>(new Set());
 
   const updateAppState = (updates: Partial<AppState>) => {
     setState(prev => ({ ...prev, ...updates }));
@@ -224,7 +231,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
             }
           : null,
         vehicleRegistration:
-          vehicle?.registration ?? vehicle?.rego ?? vehicle?.plate_number ?? null,
+          vehicle?.rego ?? vehicle?.plate_number ?? null,
       }));
     } catch (err) {
       console.warn('[Assignment] Refresh vehicle details error:', err);
@@ -264,7 +271,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       vehicleRegistration:
         assignmentStatus === 'loading'
           ? prev.vehicleRegistration
-          : assignedVehicle?.registration ?? assignedVehicle?.rego ?? assignedVehicle?.plate_number ?? null,
+          : assignedVehicle?.rego ?? assignedVehicle?.plate_number ?? null,
     }));
   }, [authUserId, currentDriver, assignmentStatus, assignedVehicle]);
 
@@ -388,6 +395,36 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       };
       return acc;
     }, {});
+  };
+
+  const createEventSignature = (
+    eventType: string,
+    shiftId: string | null,
+    metadata: Record<string, unknown>,
+  ) => {
+    const stableMetadata = Object.keys(metadata)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = metadata[key];
+        return acc;
+      }, {});
+
+    return `${eventType}:${shiftId ?? 'no-shift'}:${JSON.stringify(stableMetadata)}`;
+  };
+
+  const rememberEventSubmission = (signature: string) => {
+    recentEventSubmissions.current.set(signature, Date.now());
+    pendingEventSubmissions.current.delete(signature);
+  };
+
+  const isRecentEventSubmission = (signature: string) => {
+    const timestamp = recentEventSubmissions.current.get(signature);
+    if (!timestamp) return false;
+    if (Date.now() - timestamp > 30_000) {
+      recentEventSubmissions.current.delete(signature);
+      return false;
+    }
+    return true;
   };
 
   const normalizeShiftId = (value: unknown) => {
@@ -568,85 +605,116 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       const requestedQueueOnError = options?.queueOnError ?? true;
       const mustQueueOnError = requestedQueueOnError || CRITICAL_EVENT_TYPES.has(eventType);
       const locationOverride = options?.locationOverride;
-      const location = locationOverride
-        ? {
-            coords: {
-              latitude: locationOverride.latitude,
-              longitude: locationOverride.longitude,
-              accuracy: null,
-            },
-          }
-        : await resolveLocation();
-      const driverId = state.driverRecordId;
-      if (!driverId) {
-        return { status: 'error' as const, error: 'Driver profile not available.' };
+      const shiftId = activeShiftIdOverride || state.activeShiftId || null;
+      const eventSignature = createEventSignature(eventType, shiftId, metadata);
+
+      if (pendingEventSubmissions.current.has(eventSignature) || isRecentEventSubmission(eventSignature)) {
+        console.log('[Event] Duplicate submission ignored', { eventType, shiftId, signature: eventSignature });
+        return { status: 'sent' as const };
       }
 
-      let normalizedMetadata: Record<string, unknown> = metadata;
-      if (eventType === 'fuel_log') {
-        const receiptPhotoPath =
-          typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
+      pendingEventSubmissions.current.add(eventSignature);
+      let submissionHandled = false;
 
-        if (!receiptPhotoPath || receiptPhotoPath.startsWith('data:')) {
-          return {
-            status: 'error' as const,
-            error: 'Fuel receipt upload failed. Please retry and ensure a valid receipt path is saved.',
+      try {
+        const location = locationOverride
+          ? {
+              coords: {
+                latitude: locationOverride.latitude,
+                longitude: locationOverride.longitude,
+                accuracy: null,
+              },
+            }
+          : await resolveLocation();
+        const driverId = state.driverRecordId;
+        if (!driverId) {
+          return { status: 'error' as const, error: 'Driver profile not available.' };
+        }
+
+        let normalizedMetadata: Record<string, unknown> = metadata;
+        if (eventType === 'fuel_log') {
+          const receiptPhotoPath =
+            typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
+
+          if (!receiptPhotoPath || receiptPhotoPath.startsWith('data:')) {
+            return {
+              status: 'error' as const,
+              error: 'Fuel receipt upload failed. Please retry and ensure a valid receipt path is saved.',
+            };
+          }
+
+          const { receipt_urls: _ignoredReceiptUrls, ...rest } = metadata;
+          normalizedMetadata = {
+            ...rest,
+            receipt_photo_path: receiptPhotoPath,
           };
         }
 
-        const { receipt_urls: _ignoredReceiptUrls, ...rest } = metadata;
-        normalizedMetadata = {
-          ...rest,
-          receipt_photo_path: receiptPhotoPath,
+        console.log(`[Event] Creating event "${eventType}" with metadata`, { metadata: normalizedMetadata, location });
+        const shiftEvent = {
+          shift_id: shiftId,
+          event_type: eventType,
+          latitude: location?.coords.latitude ?? null,
+          longitude: location?.coords.longitude ?? null,
+          metadata: normalizedMetadata,
         };
-      }
 
-      console.log(`[Event] Creating event "${eventType}" with metadata`, { metadata: normalizedMetadata, location });
-      const shiftEvent = {
-        shift_id: activeShiftIdOverride || state.activeShiftId,
-        event_type: eventType,
-        latitude: location?.coords.latitude ?? null,
-        longitude: location?.coords.longitude ?? null,
-        metadata: normalizedMetadata,
-      };
+        const isOnline = await networkMonitor.isOnline();
 
-      const isOnline = await networkMonitor.isOnline();
-
-      if (!isOnline) {
-        if (mustQueueOnError) {
-          await offlineQueue.addEvent(eventType, {
-            shift_id: activeShiftIdOverride || state.activeShiftId || '',
-            event_type: eventType,
-            latitude: location?.coords.latitude ?? null,
-            longitude: location?.coords.longitude ?? null,
-            metadata: normalizedMetadata,
-          });
-          return { status: 'queued' as const, error: OFFLINE_QUEUED_MESSAGE };
+        if (!isOnline) {
+          if (mustQueueOnError) {
+            rememberEventSubmission(eventSignature);
+            submissionHandled = true;
+            await offlineQueue.addEvent(eventType, {
+              shift_id: shiftId || '',
+              event_type: eventType,
+              latitude: location?.coords.latitude ?? null,
+              longitude: location?.coords.longitude ?? null,
+              metadata: normalizedMetadata,
+            });
+            return { status: 'queued' as const, error: OFFLINE_QUEUED_MESSAGE };
+          }
+          return { status: 'error' as const, error: 'Device is offline' };
         }
-        return { status: 'error' as const, error: 'Device is offline' };
-      }
 
-      await processEventQueue();
+        await processEventQueue();
 
-      console.log(`[Event] Creating event "${eventType}"`, { shiftEvent });
-      const { error } = await supabase.from('shift_events').insert(shiftEvent);
-      console.log(`[Event] Insert result for "${eventType}"`, { error });
-      if (error) {
-        console.error('Failed to create shift_event', { eventType, shiftId: state.activeShiftId, message: error.message });
-        if (mustQueueOnError) {
-          await offlineQueue.addEvent(eventType, {
-            shift_id: activeShiftIdOverride || state.activeShiftId || '',
-            event_type: eventType,
-            latitude: location?.coords.latitude ?? null,
-            longitude: location?.coords.longitude ?? null,
-            metadata: normalizedMetadata,
+        console.log(`[Event] Creating event "${eventType}"`, { shiftEvent });
+        const { error } = await supabase.from('shift_events').insert(shiftEvent);
+        console.log(`[Event] Insert result for "${eventType}"`, { error });
+        if (error) {
+          console.error('Failed to create shift_event', {
+            eventType,
+            shiftId,
+            message: error.message,
+            code: error.code ?? 'n/a',
+            details: error.details ?? 'n/a',
+            hint: error.hint ?? 'n/a',
           });
-          return { status: 'queued' as const, error: OFFLINE_QUEUED_MESSAGE };
+          if (mustQueueOnError) {
+            rememberEventSubmission(eventSignature);
+            submissionHandled = true;
+            await offlineQueue.addEvent(eventType, {
+              shift_id: shiftId || '',
+              event_type: eventType,
+              latitude: location?.coords.latitude ?? null,
+              longitude: location?.coords.longitude ?? null,
+              metadata: normalizedMetadata,
+            });
+            return { status: 'queued' as const, error: OFFLINE_QUEUED_MESSAGE };
+          }
+          return { status: 'error' as const, error: error.message };
         }
-        return { status: 'error' as const, error: error.message };
-      }
 
-      return { status: 'sent' as const };
+        rememberEventSubmission(eventSignature);
+        submissionHandled = true;
+
+        return { status: 'sent' as const };
+      } finally {
+        if (!submissionHandled) {
+          pendingEventSubmissions.current.delete(eventSignature);
+        }
+      }
     },
     [processEventQueue, state.activeShiftId, state.driverRecordId, state.vehicleId]
   );
@@ -983,9 +1051,25 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     // Upload pre-shift photo to the odometer_photos bucket
     console.log('[StartShift] uploading odometer photo', { shiftId, userId: resolvedUserId });
-    const { path: uploadedPhotoPath, error: photoError } = await uploadShiftPhoto(shiftId, 'pre', odometerPhoto, resolvedUserId);
+    const {
+      path: uploadedPhotoPath,
+      error: photoError,
+      errorDetails: photoErrorDetails,
+      storageResponse: photoStorageResponse,
+    } = await uploadShiftPhoto(shiftId, 'pre', odometerPhoto, resolvedUserId);
     if (photoError || !uploadedPhotoPath) {
-      console.error('[StartShift] upload odometer error', { shiftId, message: photoError ?? 'no path returned' });
+      console.error('[StartShift] upload odometer error', {
+        shiftId,
+        message: photoError ?? 'no path returned',
+        storageErrorMessage: photoErrorDetails?.message ?? null,
+        storageErrorStatusCode: photoErrorDetails?.statusCode ?? null,
+        storageErrorName: photoErrorDetails?.name ?? null,
+        storageErrorCode: photoErrorDetails?.code ?? null,
+        storageErrorDetails: photoErrorDetails?.details ?? null,
+        storageErrorHint: photoErrorDetails?.hint ?? null,
+        storageErrorRaw: photoErrorDetails?.raw ?? null,
+        storageResponse: photoStorageResponse ?? null,
+      });
       await offlineQueue.addEvent('odometer_start', {
         shift_id: shiftId,
         event_type: 'odometer_start',
@@ -1026,7 +1110,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         });
 
         if (shiftStartEventError) {
-          console.error('[StartShift] odometer_start event error', {
+          console.error('[StartShift] odometer_start insert error', {
             shiftId,
             message: shiftStartEventError.message,
           });
@@ -1109,6 +1193,14 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   }) => {
     console.log('[EndShift] start', { shiftId: state.activeShiftId ?? null });
 
+    if (!payload.endOdometerPhoto.trim()) {
+      return { ok: false, error: 'End odometer photo is required.' };
+    }
+
+    if (!Number.isInteger(payload.endOdometerValue) || payload.endOdometerValue < 0) {
+      return { ok: false, error: 'End odometer must be a whole number.' };
+    }
+
     const resolvedUserId = await resolveAuthUserId();
     if (!resolvedUserId) return { ok: false, error: 'User not available.' };
 
@@ -1153,6 +1245,41 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: 'No active shift found.' };
     }
 
+    const { data: startEvents, error: startEventError } = await supabase
+      .from('shift_events')
+      .select('event_type, metadata, created_at')
+      .eq('shift_id', activeShiftId)
+      .in('event_type', ['odometer_start', 'shift_start'])
+      .order('created_at', { ascending: false })
+      .limit(5);
+
+    if (startEventError) {
+      return { ok: false, error: `Unable to validate start odometer: ${startEventError.message}` };
+    }
+
+    const startOdometer = (startEvents ?? []).reduce<number | null>((current, event) => {
+      if (!event?.metadata || typeof event.metadata !== 'object') return current;
+      const metadata = event.metadata as Record<string, unknown>;
+      const rawValue = metadata.odometer_value;
+      const numericValue =
+        typeof rawValue === 'number'
+          ? rawValue
+          : typeof rawValue === 'string'
+            ? Number(rawValue)
+            : NaN;
+      if (Number.isFinite(numericValue)) {
+        return current === null ? numericValue : current;
+      }
+      return current;
+    }, null);
+
+    if (startOdometer !== null && payload.endOdometerValue < startOdometer) {
+      return {
+        ok: false,
+        error: `End odometer cannot be less than the start odometer (${startOdometer}).`,
+      };
+    }
+
     const isOnline = await networkMonitor.isOnline();
 
     // Upload post-shift photo to the odometer_photos bucket
@@ -1183,6 +1310,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       console.error('[EndShift] error', {
         shiftId: activeShiftId,
         error: photoError ?? 'no path returned',
+        bucket: 'odometer_photos',
       });
       await offlineQueue.addEvent('odometer_end', {
         shift_id: activeShiftId,
@@ -1214,6 +1342,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         console.error('[EndShift] error', {
           shiftId: activeShiftId,
           error: shiftEventError.message,
+          code: shiftEventError.code ?? 'n/a',
+          details: shiftEventError.details ?? 'n/a',
+          hint: shiftEventError.hint ?? 'n/a',
         });
         await offlineQueue.addEvent('odometer_end', {
           shift_id: activeShiftId,
@@ -1311,16 +1442,40 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
     async (options?: { queueOnError?: boolean }) => {
       if (!state.isOnBreak) return { closed: false, durationSeconds: 0 };
 
-      const accumulated = state.breakAccumulatedSeconds ?? 0;
-      const started = state.breakStartedAt ? new Date(state.breakStartedAt).getTime() : null;
-      const runningDelta = started ? Math.floor((Date.now() - started) / 1000) : 0;
-      const totalSeconds = accumulated + runningDelta;
-      const result = await createEvent('break_end', { duration_seconds: totalSeconds }, options);
-      updateAppState({ isOnBreak: false, breakStartedAt: null, breakAccumulatedSeconds: totalSeconds });
+      const shiftId = state.activeShiftId;
+      let totalSeconds = state.breakAccumulatedSeconds ?? 0;
+
+      if (shiftId) {
+        const { data, error } = await supabase
+          .from('shift_events')
+          .select('event_type, created_at')
+          .eq('shift_id', shiftId)
+          .in('event_type', ['break_start', 'break_end'])
+          .order('created_at', { ascending: true });
+
+        if (!error && Array.isArray(data)) {
+          const summary = summarizeBreakAllowance(
+            data as Array<{ event_type: 'break_start' | 'break_end'; created_at: string }>,
+            Date.now()
+          );
+          totalSeconds = summary.totalSeconds;
+        }
+      }
+
+      let result: { status: 'sent' | 'queued' | 'error'; error?: string };
+
+      if (!shiftId) {
+        result = { status: 'error', error: 'Cannot close break without an active shift.' };
+      } else {
+        const rpcResult = await rpcEndBreak({ p_shift_id: shiftId });
+        result = rpcResult.ok ? { status: 'sent' } : { status: 'error', error: rpcResult.error };
+      }
+
+      updateAppState({ isOnBreak: false, breakStartedAt: null, breakAccumulatedSeconds: 0 });
 
       return { closed: true, durationSeconds: totalSeconds, result };
     },
-    [createEvent, state.breakAccumulatedSeconds, state.breakStartedAt, state.isOnBreak, updateAppState]
+      [state.activeShiftId, state.breakAccumulatedSeconds, state.isOnBreak, updateAppState]
   );
 
   return (

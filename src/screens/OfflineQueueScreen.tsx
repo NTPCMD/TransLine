@@ -9,9 +9,9 @@ import {
   Alert,
 } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { offlineQueue, QueuedEvent } from '../lib/offlineQueue';
 import { networkMonitor } from '../lib/networkMonitor';
-import ScreenContainer from '../components/ScreenContainer';
 import { AppButton } from '../components/AppButton';
 
 export default function OfflineQueueScreen() {
@@ -90,26 +90,28 @@ export default function OfflineQueueScreen() {
   const formatTime = formatPerthTime;
 
   const renderEventItem = ({ item }: { item: QueuedEvent }) => (
-    <View style={styles.eventCard}>
-      <View style={styles.eventHeader}>
-        <Text style={styles.eventType}>{item.payload.event_type}</Text>
-      </View>
-      <View style={styles.eventFooter}>
-        <Text style={styles.eventTime}>{formatTime(item.created_at)}</Text>
-        {item.retry_count > 0 && (
-          <Text style={styles.retryCount}>Retries: {item.retry_count}</Text>
+    <View style={styles.eventRow}>
+      <View style={styles.eventCard}>
+        <View style={styles.eventHeader}>
+          <Text style={styles.eventType}>{item.payload.event_type}</Text>
+        </View>
+        <View style={styles.eventFooter}>
+          <Text style={styles.eventTime}>{formatTime(item.created_at)}</Text>
+          {item.retry_count > 0 && (
+            <Text style={styles.retryCount}>Retries: {item.retry_count}</Text>
+          )}
+        </View>
+        <View style={styles.detailBox}>
+          <Text style={styles.detailLabel}>Payload</Text>
+          <Text style={styles.detailText}>{JSON.stringify(item.payload)}</Text>
+        </View>
+        {!!item.last_error && (
+          <View style={styles.detailBox}>
+            <Text style={styles.detailLabel}>Last Error</Text>
+            <Text style={styles.errorText}>{item.last_error}</Text>
+          </View>
         )}
       </View>
-      <View style={styles.detailBox}>
-        <Text style={styles.detailLabel}>Payload</Text>
-        <Text style={styles.detailText}>{JSON.stringify(item.payload)}</Text>
-      </View>
-      {!!item.last_error && (
-        <View style={styles.detailBox}>
-          <Text style={styles.detailLabel}>Last Error</Text>
-          <Text style={styles.errorText}>{item.last_error}</Text>
-        </View>
-      )}
     </View>
   );
 
@@ -122,68 +124,79 @@ export default function OfflineQueueScreen() {
     </View>
   );
 
-  return (
-    <ScreenContainer>
-      <View style={styles.container}>
-        <View style={styles.header}>
-          <Text style={styles.title}>Offline Queue</Text>
-          <Text style={styles.subtitle}>
-            {queue.length} event{queue.length !== 1 ? 's' : ''} in queue
-          </Text>
-          {!isOnline && (
-            <View style={styles.offlineIndicator}>
-              <Text style={styles.offlineText}>🔴 Currently Offline</Text>
-            </View>
-          )}
-          {lastSyncError ? <Text style={styles.lastErrorText}>Last sync error: {lastSyncError}</Text> : null}
+  const renderHeader = () => (
+    <View style={styles.header}>
+      <Text style={styles.title}>Offline Queue</Text>
+      <Text style={styles.subtitle}>
+        {queue.length} event{queue.length !== 1 ? 's' : ''} in queue
+      </Text>
+      {!isOnline && (
+        <View style={styles.offlineIndicator}>
+          <Text style={styles.offlineText}>🔴 Currently Offline</Text>
         </View>
+      )}
+      {lastSyncError ? <Text style={styles.lastErrorText}>Last sync error: {lastSyncError}</Text> : null}
+    </View>
+  );
 
-        <FlatList
-          data={queue}
-          renderItem={renderEventItem}
-          keyExtractor={(item) => item.id}
-          ListEmptyComponent={renderEmptyState}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              tintColor="#007bff"
-            />
-          }
-          contentContainerStyle={queue.length === 0 ? styles.emptyListContent : styles.listContent}
+  const renderFooter = () => (
+    <View style={styles.buttonContainer}>
+      <View style={styles.buttonRow}>
+        <AppButton
+          label={isSyncing ? 'Retrying...' : 'Retry sync now'}
+          onPress={handleSyncNow}
+          disabled={isSyncing || queue.length === 0}
+          variant="primary"
         />
-
-        <View style={styles.buttonContainer}>
-          <AppButton
-            label={isSyncing ? 'Retrying...' : 'Retry sync now'}
-            onPress={handleSyncNow}
-            disabled={isSyncing || queue.length === 0}
-            variant="primary"
-          />
-          <AppButton
-            label="Clear Queue"
-            onPress={handleClearQueue}
-            disabled={queue.length === 0}
-            variant="danger"
-          />
-          <AppButton
-            label="Back"
-            onPress={() => navigation.goBack()}
-            variant="secondary"
-          />
-        </View>
       </View>
-    </ScreenContainer>
+      <View style={styles.buttonRow}>
+        <AppButton
+          label="Clear Queue"
+          onPress={handleClearQueue}
+          disabled={queue.length === 0}
+          variant="danger"
+        />
+      </View>
+      <View style={styles.buttonRow}>
+        <AppButton
+          label="Back"
+          onPress={() => navigation.goBack()}
+          variant="secondary"
+        />
+      </View>
+    </View>
+  );
+
+  return (
+    <SafeAreaView style={styles.safeArea} edges={['top', 'left', 'right', 'bottom']}>
+      <FlatList
+        data={queue}
+        renderItem={renderEventItem}
+        keyExtractor={(item) => item.id}
+        ListHeaderComponent={renderHeader}
+        ListEmptyComponent={renderEmptyState}
+        ListFooterComponent={renderFooter}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor="#007bff"
+          />
+        }
+        contentContainerStyle={queue.length === 0 ? styles.emptyListContent : styles.listContent}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  safeArea: {
     flex: 1,
     backgroundColor: '#f8f9fa',
   },
   header: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
     backgroundColor: '#ffffff',
     borderBottomWidth: 1,
     borderBottomColor: '#dee2e6',
@@ -216,12 +229,19 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   listContent: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+    flexGrow: 1,
   },
   emptyListContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+    flexGrow: 1,
+  },
+  eventRow: {
+    width: '100%',
   },
   eventCard: {
     backgroundColor: '#ffffff',
@@ -235,6 +255,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 2,
     elevation: 2,
+    width: '100%',
   },
   eventHeader: {
     flexDirection: 'row',
@@ -286,7 +307,10 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     alignItems: 'center',
-    padding: 32,
+    justifyContent: 'center',
+    paddingVertical: 32,
+    paddingHorizontal: 16,
+    flex: 1,
   },
   emptyStateText: {
     fontSize: 18,
@@ -300,10 +324,16 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   buttonContainer: {
-    padding: 16,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
     backgroundColor: '#ffffff',
     borderTopWidth: 1,
     borderTopColor: '#dee2e6',
     gap: 12,
+    width: '100%',
+  },
+  buttonRow: {
+    width: '100%',
   },
 });

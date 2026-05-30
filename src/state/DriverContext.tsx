@@ -15,7 +15,6 @@ export interface DriverRecord {
 
 export interface VehicleRecord {
   id: string;
-  registration?: string | null;
   rego?: string | null;
   plate_number?: string | null;
   type?: string | null;
@@ -52,7 +51,6 @@ export function DriverProvider({ children }: { children: ReactNode }) {
   const currentVehicle: VehicleRecord | null = vehicle
     ? {
         id: vehicle.id,
-        registration: vehicle.registration ?? null,
         rego: vehicle.rego ?? null,
         plate_number: vehicle.plate_number ?? null,
         type: vehicle.type ?? null,

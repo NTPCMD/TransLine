@@ -5,11 +5,15 @@ import ScreenContainer from '../components/ScreenContainer';
 import InfoCard from '../components/InfoCard';
 import Button from '../components/Button';
 import { supabase } from '../lib/supabase';
+import {
+  MAX_BREAK_ALLOWANCE_SECONDS,
+  summarizeBreakAllowance,
+} from '../lib/breakAllowance';
+import { startBreak as rpcStartBreak, endBreak as rpcEndBreak } from '../lib/shiftLifecycle';
 import { useAppState } from '../state/AppStateContext';
 import { useActiveShift } from '../state/ActiveShiftContext';
 import type { ScreenProps } from '../types/navigation';
 
-const MAX_BREAK_SECONDS = 30 * 60; // 30 minutes
 type BreakEventType = 'break_start' | 'break_end';
 
 type BreakEventRow = {
@@ -19,12 +23,12 @@ type BreakEventRow = {
 
 export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
   const { navigation } = props;
-  const { createEvent } = useAppState();
   const { shift: activeShift, status: activeShiftStatus, reload: reloadActiveShift } = useActiveShift();
   const [breakEvents, setBreakEvents] = useState<BreakEventRow[]>([]);
   const [isLoadingEvents, setIsLoadingEvents] = useState(false);
   const [nowMs, setNowMs] = useState(Date.now());
   const [isProcessing, setIsProcessing] = useState(false);
+  const [autoEndedForAllowance, setAutoEndedForAllowance] = useState(false);
   const activeShiftLoading = activeShiftStatus === 'loading';
 
   const loadBreakEvents = useCallback(async () => {
@@ -90,44 +94,58 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
   }, [activeShift?.id, activeShiftLoading, loadBreakEvents]);
 
   const breakSummary = useMemo(() => {
-    let totalSeconds = 0;
-    let activeBreakStartMs: number | null = null;
-
-    for (const event of breakEvents) {
-      const eventMs = new Date(event.created_at).getTime();
-      if (!Number.isFinite(eventMs)) continue;
-
-      if (event.event_type === 'break_start') {
-        activeBreakStartMs = eventMs;
-        continue;
-      }
-
-      if (event.event_type === 'break_end' && activeBreakStartMs !== null) {
-        if (eventMs > activeBreakStartMs) {
-          totalSeconds += Math.floor((eventMs - activeBreakStartMs) / 1000);
-        }
-        activeBreakStartMs = null;
-      }
-    }
-
-    if (activeBreakStartMs !== null && nowMs > activeBreakStartMs) {
-      totalSeconds += Math.floor((nowMs - activeBreakStartMs) / 1000);
-    }
-
-    const remainingSeconds = Math.max(0, MAX_BREAK_SECONDS - totalSeconds);
-    const lastEventType = breakEvents.length > 0 ? breakEvents[breakEvents.length - 1].event_type : null;
-
-    return {
-      totalSeconds,
-      remainingSeconds,
-      activeBreakStartMs,
-      isOnBreak: lastEventType === 'break_start',
-      currentSessionSeconds:
-        activeBreakStartMs !== null && nowMs > activeBreakStartMs
-          ? Math.floor((nowMs - activeBreakStartMs) / 1000)
-          : 0,
-    };
+    return summarizeBreakAllowance(breakEvents, nowMs);
   }, [breakEvents, nowMs]);
+
+  const endBreakWithAllowanceMetadata = useCallback(
+    async () => {
+      if (!activeShift?.id) {
+        return { status: 'error' as const, error: 'Cannot end break without an active shift.' };
+      }
+
+      const rpcResult = await rpcEndBreak({ p_shift_id: activeShift.id });
+      return rpcResult.ok
+        ? ({ status: 'sent' as const } as const)
+        : ({ status: 'error' as const, error: rpcResult.error } as const);
+    },
+    [activeShift?.id]
+  );
+
+  useEffect(() => {
+    if (!breakSummary.isOnBreak || autoEndedForAllowance || isProcessing || !activeShift?.id) {
+      return;
+    }
+
+    if (!breakSummary.isUsedUp) {
+      setAutoEndedForAllowance(false);
+      return;
+    }
+
+    setAutoEndedForAllowance(true);
+    setIsProcessing(true);
+    void (async () => {
+      try {
+          const result = await endBreakWithAllowanceMetadata();
+        if (result.status === 'sent') {
+          await loadBreakEvents();
+          alert('Break allowance already used. Break ended automatically.');
+        } else {
+          alert(result.error ?? 'Failed to auto-end break at allowance limit.');
+        }
+      } finally {
+        setIsProcessing(false);
+      }
+    })();
+  }, [
+    activeShift?.id,
+    autoEndedForAllowance,
+    breakSummary.isOnBreak,
+    breakSummary.isUsedUp,
+    breakSummary.totalSeconds,
+    endBreakWithAllowanceMetadata,
+    isProcessing,
+    loadBreakEvents,
+  ]);
 
   const startBreak = async () => {
     console.log('[Break] startBreak pressed');
@@ -138,19 +156,17 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
     }
     if (activeShiftLoading || !activeShift?.id) return;
     if (breakSummary.remainingSeconds <= 0) {
-      alert('Maximum break time (30 minutes) already reached for this shift.');
+      alert('Break allowance already used.');
       return;
     }
     setIsProcessing(true);
     try {
-      const result = await createEvent('break_start', {}, undefined, activeShift.id);
-      if (result.status === 'sent' || result.status === 'queued') {
+      const rpcResult = await rpcStartBreak({ p_shift_id: activeShift.id });
+      if (rpcResult.ok) {
+        setAutoEndedForAllowance(false);
         await loadBreakEvents();
-        if (result.status === 'queued') {
-          alert('Saved offline. Will sync automatically.');
-        }
       } else {
-        alert(result.error ?? 'Failed to persist break start event.');
+        alert(rpcResult.error ?? 'Failed to start break.');
       }
     } finally {
       setIsProcessing(false);
@@ -168,18 +184,13 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
       return;
     }
 
-    const totalSeconds = breakSummary.totalSeconds;
-
     setIsProcessing(true);
     try {
-      const result = await createEvent('break_end', { duration_seconds: totalSeconds }, undefined, activeShift.id);
-      if (result.status === 'sent' || result.status === 'queued') {
+      const result = await endBreakWithAllowanceMetadata();
+      if (result.status === 'sent') {
         await loadBreakEvents();
-        if (result.status === 'queued') {
-          alert('Saved offline. Will sync automatically.');
-        }
       } else {
-        alert(result.error ?? 'Failed to persist break end event.');
+        alert(result.error ?? 'Failed to end break.');
         return;
       }
     } finally {
@@ -192,6 +203,7 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
   const seconds = breakSummary.totalSeconds % 60;
   const remainingSeconds = breakSummary.remainingSeconds;
   const remainingMinutes = Math.floor(remainingSeconds / 60);
+  const allowanceMinutes = Math.floor(MAX_BREAK_ALLOWANCE_SECONDS / 60);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -203,7 +215,13 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
           <Text style={styles.text}>Status: {breakSummary.isOnBreak ? 'On break' : 'Not on break'}</Text>
           <Text style={styles.meta}>Current session: {Math.floor(breakSummary.currentSessionSeconds / 60)}m {breakSummary.currentSessionSeconds % 60}s</Text>
           <Text style={styles.meta}>Total this shift: {minutes}m {seconds}s</Text>
+          <Text style={styles.meta}>Allowed break time: {allowanceMinutes}m</Text>
           <Text style={styles.meta}>Remaining allowed: {remainingMinutes}m {remainingSeconds % 60}s</Text>
+          <Text style={styles.meta}>Portal status: {breakSummary.portalStatus}</Text>
+          {breakSummary.isUsedUp ? <Text style={styles.warningText}>Break allowance already used.</Text> : null}
+          {breakSummary.isExceeded ? (
+            <Text style={styles.warningText}>Exceeded allowance by {Math.floor(breakSummary.exceededBySeconds / 60)}m {breakSummary.exceededBySeconds % 60}s.</Text>
+          ) : null}
           {isLoadingEvents && <Text style={styles.meta}>Refreshing break events...</Text>}
         </InfoCard>
 
@@ -255,6 +273,12 @@ const styles = StyleSheet.create({
     color: '#4B5563',
     fontSize: 14,
     marginBottom: 4,
+  },
+  warningText: {
+    color: '#B91C1C',
+    fontSize: 14,
+    marginBottom: 4,
+    fontWeight: '600',
   },
   buttonGroup: {
     gap: 12,
