@@ -17,6 +17,8 @@ import { AppStateProvider } from './src/state/AppStateContext';
 import { DriverProvider, useDriver } from './src/state/DriverContext';
 import { AssignmentProvider } from './src/state/AssignmentContext';
 import { ActiveShiftProvider } from './src/state/ActiveShiftContext';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { isSupabaseConfigured } from './src/lib/supabase';
 
 const BUILD_STAMP = 'APP BUILD: transline-driver-fullflow-2026-02-02';
 
@@ -201,15 +203,27 @@ export default function App() {
 
   return (
     <View style={{ flex: 1, position: 'relative' }}>
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <DriverProvider>
-          <AssignmentProvider>
-            <AppStateProvider>
-              <AppContent />
-            </AppStateProvider>
-          </AssignmentProvider>
-        </DriverProvider>
-      </GestureHandlerRootView>
+      <ErrorBoundary>
+        {isSupabaseConfigured ? (
+          <GestureHandlerRootView style={{ flex: 1 }}>
+            <DriverProvider>
+              <AssignmentProvider>
+                <AppStateProvider>
+                  <AppContent />
+                </AppStateProvider>
+              </AssignmentProvider>
+            </DriverProvider>
+          </GestureHandlerRootView>
+        ) : (
+          <View style={styles.configError}>
+            <Text style={styles.configErrorTitle}>App configuration missing</Text>
+            <Text style={styles.configErrorText}>
+              The app could not find its Supabase connection settings, so it can't start. This is a
+              build configuration problem, not something you did. Please contact support.
+            </Text>
+          </View>
+        )}
+      </ErrorBoundary>
       <View
         style={{
           position: 'absolute',
@@ -231,6 +245,26 @@ export default function App() {
 }
 
 const styles = StyleSheet.create({
+  configError: {
+    flex: 1,
+    backgroundColor: '#0F0F0F',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  configErrorTitle: {
+    color: '#FFFFFF',
+    fontSize: 20,
+    fontWeight: '800',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  configErrorText: {
+    color: '#D1D5DB',
+    fontSize: 15,
+    lineHeight: 22,
+    textAlign: 'center',
+  },
   transitionMask: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: '#C62828',

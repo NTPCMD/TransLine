@@ -14,8 +14,17 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://fjllbnhcyugxltiresjp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqbGxibmhjeXVneGx0aXJlc2pwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5ODAyNzMsImV4cCI6MjA4NzU1NjI3M30.alLINSopMh0fhu-Ae0kUbczNXdTVlk-JtWMMEpgjeuI"
       }
     },
-    "production": {}
+    "production": {
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://fjllbnhcyugxltiresjp.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZqbGxibmhjeXVneGx0aXJlc2pwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE5ODAyNzMsImV4cCI6MjA4NzU1NjI3M30.alLINSopMh0fhu-Ae0kUbczNXdTVlk-JtWMMEpgjeuI"
+      }
+    }
   }
 }
