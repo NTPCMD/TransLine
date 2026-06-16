@@ -8,6 +8,8 @@ import PhotoPicker from '../components/PhotoPicker';
 import { useAppState } from '../state/AppStateContext';
 import { uploadFuelReceipt } from '../lib/photoUpload';
 import { supabase } from '../lib/supabase';
+import { networkMonitor } from '../lib/networkMonitor';
+import { offlineQueue } from '../lib/offlineQueue';
 import type { ScreenProps } from '../types/navigation';
 
 type GpsCaptureState =
@@ -380,33 +382,31 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
         return;
       }
 
-      // Upload receipt photo to Supabase Storage
-      console.log('[FuelReceipt] uploading to fuel_receipts', {
-        bucket: 'fuel_receipts',
-        shiftId,
-        userId: authUserId,
-      });
-      const { path: receiptPhotoPath, error: uploadError } = await uploadFuelReceipt(
-        shiftId,
-        receiptUri,
-        authUserId
-      );
-
-      if (uploadError || !receiptPhotoPath) {
-        console.error('[FuelReceipt] upload failed', { message: uploadError ?? 'no path returned' });
-        setSubmitError(uploadError ?? 'Failed to upload receipt photo.');
-        Alert.alert('Upload failed', uploadError ?? 'Failed to upload receipt photo.');
-        return;
+      // Receipt upload needs the network. When offline (or the upload fails),
+      // queue the fuel log with the local receipt URI — the offline queue uploads
+      // it and inserts the event once connectivity returns.
+      const online = await networkMonitor.isOnline();
+      let receiptPhotoPath: string | null = null;
+      if (online) {
+        console.log('[FuelReceipt] uploading to fuel_receipts', {
+          bucket: 'fuel_receipts',
+          shiftId,
+          userId: authUserId,
+        });
+        const { path, error: uploadError } = await uploadFuelReceipt(shiftId, receiptUri, authUserId);
+        if (uploadError || !path) {
+          console.warn('[FuelReceipt] upload failed, will queue for retry', { message: uploadError ?? 'no path returned' });
+        } else {
+          receiptPhotoPath = path;
+          console.log('[FuelReceipt] upload success path', { receiptPhotoPath });
+        }
       }
 
-      console.log('[FuelReceipt] upload success path', { receiptPhotoPath });
-
-      const fuelMetadata = {
+      const baseFuelMetadata = {
         litres: litresNum,
         cost: costNum,
         odometer_km: odometerNum,
         location_name: location,
-        receipt_photo_path: receiptPhotoPath,
         accuracy: capturedGps.accuracy,
         captured_at: capturedAt,
         driver_id: driverId,
@@ -414,6 +414,22 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
         shift_id: shiftId,
       };
 
+      if (!receiptPhotoPath) {
+        // Offline / upload failed → queue with the local receipt URI.
+        await offlineQueue.addEvent('fuel_log', {
+          shift_id: shiftId,
+          event_type: 'fuel_log',
+          latitude: capturedGps.latitude,
+          longitude: capturedGps.longitude,
+          metadata: { ...baseFuelMetadata, local_receipt_uri: receiptUri },
+        });
+        updateAppState({ lastFueled: capturedAt });
+        Alert.alert('Saved offline', 'Fuel entry saved offline. The receipt will upload and sync automatically when you are back online.');
+        navigation.goBack();
+        return;
+      }
+
+      const fuelMetadata = { ...baseFuelMetadata, receipt_photo_path: receiptPhotoPath };
       console.log('[FuelLog] metadata before createEvent', fuelMetadata);
 
       const result = await createEvent(

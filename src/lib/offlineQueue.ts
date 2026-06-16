@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from './supabase';
 import { networkMonitor } from './networkMonitor';
+import { uploadFuelReceipt } from './photoUpload';
 
 const QUEUE_STORAGE_KEY = 'transline:offlineQueue';
 const RETRY_INTERVAL_MS = 30_000;
@@ -317,7 +318,13 @@ class OfflineQueue {
       }
 
       try {
-        const { error } = await supabase.from('shift_events').insert(item.payload);
+        const insertPayload = await this.buildInsertPayload(item);
+        // Preserve when the event actually occurred (enqueue time) instead of
+        // letting the DB stamp it at sync time — break durations and tracking
+        // history are computed from created_at, so a late sync must not shift it.
+        const { error } = await supabase
+          .from('shift_events')
+          .insert({ ...insertPayload, created_at: item.created_at });
         if (error) {
           throw error;
         }
@@ -352,6 +359,41 @@ class OfflineQueue {
     this.isSyncing = false;
   }
 
+  /**
+   * Produce the row to insert for a queued event. For fuel logs captured while
+   * offline we only stored the local receipt URI (the upload needs the network);
+   * upload it now and swap in the resulting storage path before inserting.
+   */
+  private async buildInsertPayload(item: QueuedEvent): Promise<QueuedShiftEventPayload> {
+    if (item.payload.event_type !== 'fuel_log') {
+      return item.payload;
+    }
+
+    const metadata = { ...item.payload.metadata } as Record<string, unknown>;
+    const localUri = typeof metadata.local_receipt_uri === 'string' ? metadata.local_receipt_uri : '';
+    const existingPath =
+      typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
+
+    if (!localUri || existingPath) {
+      return item.payload;
+    }
+
+    const { data } = await supabase.auth.getUser();
+    const userId = data?.user?.id ?? null;
+    if (!userId) {
+      throw new Error('Cannot upload queued fuel receipt: no authenticated user.');
+    }
+
+    const { path, error } = await uploadFuelReceipt(item.payload.shift_id, localUri, userId);
+    if (error || !path) {
+      throw new Error(error ?? 'Queued fuel receipt upload failed.');
+    }
+
+    delete metadata.local_receipt_uri;
+    metadata.receipt_photo_path = path;
+    return { ...item.payload, metadata };
+  }
+
   async retryNow(): Promise<void> {
     console.log('[offlineQueue] manual retry pressed');
     await this.syncQueue();
@@ -359,6 +401,22 @@ class OfflineQueue {
 
   getQueue(): QueuedEvent[] {
     return [...this.queue];
+  }
+
+  /**
+   * Returns queued (not-yet-synced) shift events for a shift, optionally filtered
+   * by event type. Used by screens (e.g. break control) to overlay pending
+   * actions on top of server data so the UI stays correct while offline.
+   */
+  getQueuedShiftEvents(
+    shiftId: string,
+    eventTypes?: string[]
+  ): Array<{ event_type: string; created_at: string }> {
+    const typeFilter = eventTypes ? new Set(eventTypes) : null;
+    return this.queue
+      .filter((item) => item.payload.shift_id === shiftId)
+      .filter((item) => !typeFilter || typeFilter.has(item.payload.event_type))
+      .map((item) => ({ event_type: item.payload.event_type, created_at: item.created_at }));
   }
 
   getQueuedCount(): number {
