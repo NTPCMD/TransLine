@@ -14,6 +14,23 @@ NetInfo.configure({
 
 type NetworkCallback = (isOnline: boolean) => void;
 
+/**
+ * Decides whether a failed Supabase write should be treated as a connectivity
+ * problem (safe to queue offline) versus a real server-side rejection that the
+ * user must see. A PostgREST/Postgres error that carries a `code` reached the
+ * database and is a genuine rejection (constraint, permission, raised
+ * exception) — never hide that behind "Saved offline". A failure with no code
+ * is almost always a transport/connectivity drop, so queueing is appropriate.
+ */
+export function isTransportError(code?: string | null, message?: string | null): boolean {
+  if (code && code.trim().length > 0) return false;
+  if (message && /Network request failed|Failed to fetch|Load failed|network error|timeout|timed out|ECONN|ENOTFOUND|ETIMEDOUT/i.test(message)) {
+    return true;
+  }
+  // No structured error code → assume a connectivity/transport issue.
+  return true;
+}
+
 /** Lightweight HTTP probe — used as a fallback when the native module is absent. */
 async function httpProbeOnline(): Promise<boolean> {
   try {

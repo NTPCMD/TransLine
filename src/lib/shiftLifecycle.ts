@@ -52,11 +52,11 @@ export async function endShift(params: {
   p_shift_id: string;
   p_end_lat?: number | null;
   p_end_lng?: number | null;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; error?: string; code?: string }> {
   const { error } = await supabase.rpc('end_shift', params);
   if (error) {
     console.error('[shiftLifecycle] end_shift RPC error:', error.message);
-    return { ok: false, error: error.message };
+    return { ok: false, error: error.message, code: error.code };
   }
   return { ok: true };
 }
@@ -80,11 +80,11 @@ export async function logIdleEvent(params: {
  */
 export async function startBreak(params: {
   p_shift_id: string;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; error?: string; code?: string }> {
   const { error } = await supabase.rpc('start_break', params);
   if (error) {
     console.error('[shiftLifecycle] start_break RPC error:', error.message);
-    return { ok: false, error: error.message };
+    return { ok: false, error: error.message, code: error.code };
   }
   return { ok: true };
 }
@@ -94,11 +94,11 @@ export async function startBreak(params: {
  */
 export async function endBreak(params: {
   p_shift_id: string;
-}): Promise<{ ok: boolean; error?: string }> {
+}): Promise<{ ok: boolean; error?: string; code?: string }> {
   const { error } = await supabase.rpc('end_break', params);
   if (error) {
     console.error('[shiftLifecycle] end_break RPC error:', error.message);
-    return { ok: false, error: error.message };
+    return { ok: false, error: error.message, code: error.code };
   }
   return { ok: true };
 }

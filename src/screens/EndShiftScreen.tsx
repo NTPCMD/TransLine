@@ -180,7 +180,13 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
 
     try {
       if (state.isOnBreak) {
-        await closeActiveBreak();
+        const breakClose = await closeActiveBreak();
+        if (breakClose.result?.status === 'error') {
+          const message = breakClose.result.error ?? 'Could not end your active break. Please try again.';
+          setSubmitError(message);
+          Alert.alert('Could not end break', message);
+          return;
+        }
       }
 
       console.log('[EndShift] calling endShift');

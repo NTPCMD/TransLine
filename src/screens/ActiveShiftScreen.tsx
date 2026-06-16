@@ -367,11 +367,16 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
 
   if (!activeShift?.id) return null;
 
+  // Stable indicator for the UI: tracking is "active" whenever we have an active
+  // shift and location permission, even during the brief moment the poll loop is
+  // being (re)started — avoids the status flickering Active → Paused → Active.
+  const trackingActive = isPolling || permissionStatus === Location.PermissionStatus.GRANTED;
+
   const pollCountdown = isPolling && nextPollAt ? nextPollAt - now : null;
   const uploadCountdown = isPolling && nextUploadAt ? nextUploadAt - now : null;
 
   const statusRows: [string, string][] = [
-    ['Tracking', isPolling ? 'Active' : 'Paused'],
+    ['Tracking', trackingActive ? 'Active' : 'Paused'],
     ['GPS permission', formatPermission(permissionStatus)],
     ['Last fix', lastFixTime ? formatPerthTime(lastFixTime) : 'Not available'],
     ['Next GPS check', pollCountdown !== null ? formatCountdown(pollCountdown) : 'Not scheduled'],
@@ -389,7 +394,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
         driverName={driver?.name ?? 'Driver'}
         vehicleLabel={finalVehicleLabel}
         shiftDuration={getShiftDuration()}
-        isTracking={isPolling}
+        isTracking={trackingActive}
       />
 
       <View style={{ padding: 16 }}>

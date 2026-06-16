@@ -6,7 +6,7 @@ import { useDriver } from './DriverContext';
 import { useActiveAssignment } from './AssignmentContext';
 import { getAssignedVehicleForCurrentUser } from '../lib/assignment';
 import { getGpsFix } from '../lib/locationEvents';
-import { networkMonitor } from '../lib/networkMonitor';
+import { networkMonitor, isTransportError } from '../lib/networkMonitor';
 import { offlineQueue } from '../lib/offlineQueue';
 import {
   startShift as rpcStartShift,
@@ -1320,12 +1320,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     let queued = false;
 
-    if (photoError || !uploadedPhotoPath) {
-      console.error('[EndShift] error', {
-        shiftId: activeShiftId,
-        error: photoError ?? 'no path returned',
-        bucket: 'odometer_photos',
-      });
+    if (!isOnline) {
+      // Genuinely offline: queue the odometer reading + end_shift RPC and finalize
+      // the shift locally. This is the only path that legitimately shows "Saved offline".
       await offlineQueue.addEvent('odometer_end', {
         shift_id: activeShiftId,
         event_type: 'odometer_end',
@@ -1333,67 +1330,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         longitude: payload.location.lng,
         metadata: odometerEndMetadata,
       });
-      queued = true;
-    } else if (!isOnline) {
-      await offlineQueue.addEvent('odometer_end', {
-        shift_id: activeShiftId,
-        event_type: 'odometer_end',
-        latitude: payload.location.lat,
-        longitude: payload.location.lng,
-        metadata: odometerEndMetadata,
-      });
-      queued = true;
-    } else {
-      const { error: shiftEventError } = await supabase.from('shift_events').insert({
-        shift_id: activeShiftId,
-        event_type: 'odometer_end',
-        latitude: payload.location.lat,
-        longitude: payload.location.lng,
-        metadata: odometerEndMetadata,
-      });
-
-      if (shiftEventError) {
-        console.error('[EndShift] error', {
-          shiftId: activeShiftId,
-          error: shiftEventError.message,
-          code: shiftEventError.code ?? 'n/a',
-          details: shiftEventError.details ?? 'n/a',
-          hint: shiftEventError.hint ?? 'n/a',
-        });
-        await offlineQueue.addEvent('odometer_end', {
-          shift_id: activeShiftId,
-          event_type: 'odometer_end',
-          latitude: payload.location.lat,
-          longitude: payload.location.lng,
-          metadata: {
-            ...odometerEndMetadata,
-            insert_error: shiftEventError.message,
-          },
-        });
-        queued = true;
-      }
-    }
-
-    console.log('[EndShift] success', {
-      shiftId: activeShiftId,
-      step: 'odometer_end_event_inserted',
-      odometerValue: payload.endOdometerValue,
-    });
-
-    let rpcOk = false;
-    let rpcError: string | undefined;
-
-    if (isOnline) {
-      const rpcResult = await rpcEndShift({
-        p_shift_id: activeShiftId,
-        p_end_lat: payload.location.lat,
-        p_end_lng: payload.location.lng,
-      });
-      rpcOk = rpcResult.ok;
-      rpcError = rpcResult.error;
-    }
-
-    if (!isOnline || !rpcOk) {
       await queueWrite({
         id: `${Date.now()}-end-shift`,
         type: 'rpc_call',
@@ -1405,12 +1341,88 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         },
       });
       queued = true;
+    } else {
+      // Online: every step must genuinely succeed. A real server/upload rejection is
+      // surfaced to the driver (they stay on End Shift and retry) instead of being
+      // hidden behind "Saved offline" while the shift never actually ends.
+      if (photoError || !uploadedPhotoPath) {
+        console.error('[EndShift] odometer photo upload failed while online', {
+          shiftId: activeShiftId,
+          error: photoError ?? 'no path returned',
+        });
+        return {
+          ok: false,
+          error: `Could not upload the final odometer photo.${photoError ? ` ${photoError}` : ''} Please check your connection and try again.`,
+        };
+      }
+
+      const { error: shiftEventError } = await supabase.from('shift_events').insert({
+        shift_id: activeShiftId,
+        event_type: 'odometer_end',
+        latitude: payload.location.lat,
+        longitude: payload.location.lng,
+        metadata: odometerEndMetadata,
+      });
+
+      if (shiftEventError) {
+        console.error('[EndShift] odometer_end insert error', {
+          shiftId: activeShiftId,
+          error: shiftEventError.message,
+          code: shiftEventError.code ?? 'n/a',
+        });
+        if (!isTransportError(shiftEventError.code, shiftEventError.message)) {
+          return { ok: false, error: `Could not save the final odometer reading: ${shiftEventError.message}` };
+        }
+        // Connectivity dropped mid-request — queue and finalize locally.
+        await offlineQueue.addEvent('odometer_end', {
+          shift_id: activeShiftId,
+          event_type: 'odometer_end',
+          latitude: payload.location.lat,
+          longitude: payload.location.lng,
+          metadata: { ...odometerEndMetadata, insert_error: shiftEventError.message },
+        });
+        await queueWrite({
+          id: `${Date.now()}-end-shift`,
+          type: 'rpc_call',
+          name: 'end_shift',
+          params: {
+            p_shift_id: activeShiftId,
+            p_end_lat: payload.location.lat,
+            p_end_lng: payload.location.lng,
+          },
+        });
+        queued = true;
+      } else {
+        const rpcResult = await rpcEndShift({
+          p_shift_id: activeShiftId,
+          p_end_lat: payload.location.lat,
+          p_end_lng: payload.location.lng,
+        });
+        if (!rpcResult.ok) {
+          console.error('[EndShift] end_shift RPC failed', {
+            error: rpcResult.error,
+            code: rpcResult.code ?? 'n/a',
+          });
+          if (!isTransportError(rpcResult.code, rpcResult.error)) {
+            return { ok: false, error: rpcResult.error ?? 'Unable to end shift. Please try again.' };
+          }
+          await queueWrite({
+            id: `${Date.now()}-end-shift`,
+            type: 'rpc_call',
+            name: 'end_shift',
+            params: {
+              p_shift_id: activeShiftId,
+              p_end_lat: payload.location.lat,
+              p_end_lng: payload.location.lng,
+            },
+          });
+          queued = true;
+        }
+      }
     }
 
-    console.log('[EndShift] success OR error', {
+    console.log('[EndShift] finalizing', {
       shiftId: activeShiftId,
-      ok: rpcOk,
-      error: rpcError ?? null,
       queued,
     });
 
@@ -1482,13 +1494,23 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         result = { status: 'error', error: 'Cannot close break without an active shift.' };
       } else {
         const online = await networkMonitor.isOnline();
-        const rpcResult = online ? await rpcEndBreak({ p_shift_id: shiftId }) : { ok: false };
+        const rpcResult = online
+          ? await rpcEndBreak({ p_shift_id: shiftId })
+          : { ok: false as const, error: undefined, code: undefined };
+
         if (rpcResult.ok) {
           result = { status: 'sent' };
+        } else if (online && !isTransportError(rpcResult.code, rpcResult.error)) {
+          // Online and the server rejected it — surface the real error and leave
+          // the break open so the driver can act, rather than masking as offline.
+          return {
+            closed: false,
+            durationSeconds: totalSeconds,
+            result: { status: 'error' as const, error: rpcResult.error ?? 'Could not end the active break.' },
+          };
         } else {
-          // Offline (or the RPC failed): queue the break_end so the break is
-          // properly closed server-side once connectivity returns, rather than
-          // dropping it silently when the driver ends a shift while on break.
+          // Offline (or a transport drop): queue the break_end so the break is
+          // closed server-side once connectivity returns.
           await offlineQueue.addEvent('break_end', {
             shift_id: shiftId,
             event_type: 'break_end',

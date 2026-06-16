@@ -395,11 +395,15 @@ export default function FuelLogScreen(props: ScreenProps<'FuelLog'>) {
         });
         const { path, error: uploadError } = await uploadFuelReceipt(shiftId, receiptUri, authUserId);
         if (uploadError || !path) {
-          console.warn('[FuelReceipt] upload failed, will queue for retry', { message: uploadError ?? 'no path returned' });
-        } else {
-          receiptPhotoPath = path;
-          console.log('[FuelReceipt] upload success path', { receiptPhotoPath });
+          // Online but the receipt upload genuinely failed — surface it instead of
+          // pretending it saved offline.
+          console.error('[FuelReceipt] upload failed while online', { message: uploadError ?? 'no path returned' });
+          setSubmitError(uploadError ?? 'Failed to upload receipt photo.');
+          Alert.alert('Upload failed', uploadError ?? 'Failed to upload receipt photo. Please try again.');
+          return;
         }
+        receiptPhotoPath = path;
+        console.log('[FuelReceipt] upload success path', { receiptPhotoPath });
       }
 
       const baseFuelMetadata = {

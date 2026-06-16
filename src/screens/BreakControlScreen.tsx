@@ -12,7 +12,7 @@ import {
 import { startBreak as rpcStartBreak, endBreak as rpcEndBreak } from '../lib/shiftLifecycle';
 import { useAppState } from '../state/AppStateContext';
 import { useActiveShift } from '../state/ActiveShiftContext';
-import { networkMonitor } from '../lib/networkMonitor';
+import { networkMonitor, isTransportError } from '../lib/networkMonitor';
 import { offlineQueue } from '../lib/offlineQueue';
 import type { ScreenProps } from '../types/navigation';
 
@@ -167,7 +167,12 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
         if (rpcResult.ok) {
           return { status: 'sent' };
         }
-        console.warn('[Break] RPC failed, queuing offline', { eventType, error: rpcResult.error });
+        // Online but the server rejected it (has a code) — surface the real error
+        // instead of silently queuing, so a break never appears to save but doesn't.
+        if (!isTransportError(rpcResult.code, rpcResult.error)) {
+          return { status: 'error', error: rpcResult.error ?? 'The server rejected this break action.' };
+        }
+        console.warn('[Break] transport error, queuing offline', { eventType, error: rpcResult.error });
       }
 
       await offlineQueue.addEvent(eventType, {
