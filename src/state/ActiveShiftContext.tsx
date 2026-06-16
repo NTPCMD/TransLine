@@ -2,6 +2,11 @@ import React, { createContext, useCallback, useContext, useEffect, useRef, useSt
 import { AppState } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { networkMonitor } from '../lib/networkMonitor';
+import {
+  startBackgroundLocationTracking,
+  stopBackgroundLocationTracking,
+  drainBackgroundLocationQueue,
+} from '../lib/backgroundLocation';
 
 export interface Shift {
   id: string;
@@ -98,12 +103,25 @@ export function ActiveShiftProvider({ children, driverId }: { children: ReactNod
       if (!isOnline) return;
       console.log('[ActiveShift] network reconnected; refreshing active shift');
       void reload();
+      // Flush any location breadcrumbs the background task buffered while offline.
+      void drainBackgroundLocationQueue();
     });
 
     return () => {
       unsubscribe();
     };
   }, [reload]);
+
+  // Auto start/stop OS-level background location tracking with the shift.
+  // This is independent of which screen is mounted, so tracking keeps running
+  // when the app is backgrounded or the driver navigates away.
+  useEffect(() => {
+    if (status === 'active' && shift?.id) {
+      void startBackgroundLocationTracking(shift.id);
+    } else if (status === 'none' || status === 'error') {
+      void stopBackgroundLocationTracking();
+    }
+  }, [status, shift?.id]);
 
   return (
     <ActiveShiftContext.Provider value={{ shift, status, error, reload }}>

@@ -12,6 +12,8 @@ import {
 import { startBreak as rpcStartBreak, endBreak as rpcEndBreak } from '../lib/shiftLifecycle';
 import { useAppState } from '../state/AppStateContext';
 import { useActiveShift } from '../state/ActiveShiftContext';
+import { networkMonitor, isTransportError } from '../lib/networkMonitor';
+import { offlineQueue } from '../lib/offlineQueue';
 import type { ScreenProps } from '../types/navigation';
 
 type BreakEventType = 'break_start' | 'break_end';
@@ -19,6 +21,26 @@ type BreakEventType = 'break_start' | 'break_end';
 type BreakEventRow = {
   event_type: BreakEventType;
   created_at: string;
+};
+
+// Merge server break events with any still-queued (offline) ones so the timer
+// and allowance stay correct without a connection. De-duped on type+timestamp:
+// once a queued event syncs it is inserted with the same created_at, so the
+// server copy replaces the queued copy cleanly instead of double-counting.
+const mergeBreakEvents = (
+  serverEvents: BreakEventRow[],
+  queuedEvents: Array<{ event_type: string; created_at: string }>
+): BreakEventRow[] => {
+  const byKey = new Map<string, BreakEventRow>();
+  const add = (eventType: string, createdAt: string) => {
+    if (eventType !== 'break_start' && eventType !== 'break_end') return;
+    byKey.set(`${eventType}|${createdAt}`, { event_type: eventType, created_at: createdAt });
+  };
+  serverEvents.forEach((event) => add(event.event_type, event.created_at));
+  queuedEvents.forEach((event) => add(event.event_type, event.created_at));
+  return Array.from(byKey.values()).sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+  );
 };
 
 export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
@@ -41,24 +63,36 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
       return;
     }
 
+    const shiftId = activeShift.id;
+    const queued = offlineQueue.getQueuedShiftEvents(shiftId, ['break_start', 'break_end']);
+
     setIsLoadingEvents(true);
     try {
-      const { data, error } = await supabase
-        .from('shift_events')
-        .select('event_type, created_at')
-        .eq('shift_id', activeShift.id)
-        .in('event_type', ['break_start', 'break_end'])
-        .order('created_at', { ascending: true });
+      const online = await networkMonitor.isOnline();
+      let serverEvents: BreakEventRow[] = [];
 
-      if (error) {
-        console.error('[BreakControl] Failed to load break events', {
-          shiftId: activeShift.id,
-          supabaseError: `${error.message} (code=${error.code ?? 'n/a'}, details=${error.details ?? 'n/a'}, hint=${error.hint ?? 'n/a'})`,
-        });
-        return;
+      if (online) {
+        const { data, error } = await supabase
+          .from('shift_events')
+          .select('event_type, created_at')
+          .eq('shift_id', shiftId)
+          .in('event_type', ['break_start', 'break_end'])
+          .order('created_at', { ascending: true });
+
+        if (error) {
+          console.error('[BreakControl] Failed to load break events', {
+            shiftId,
+            supabaseError: `${error.message} (code=${error.code ?? 'n/a'}, details=${error.details ?? 'n/a'}, hint=${error.hint ?? 'n/a'})`,
+          });
+          // Fall back to whatever is queued locally so the UI stays usable.
+          setBreakEvents(mergeBreakEvents([], queued));
+          return;
+        }
+
+        serverEvents = (data ?? []) as BreakEventRow[];
       }
 
-      setBreakEvents((data ?? []) as BreakEventRow[]);
+      setBreakEvents(mergeBreakEvents(serverEvents, queued));
     } finally {
       setIsLoadingEvents(false);
     }
@@ -93,22 +127,69 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
     void loadBreakEvents();
   }, [activeShift?.id, activeShiftLoading, loadBreakEvents]);
 
+  // Reconcile when the offline queue drains (a queued break synced) or the
+  // network comes back, so server data replaces the optimistic local copy.
+  useEffect(() => {
+    const unsubscribeQueue = offlineQueue.subscribe(() => {
+      void loadBreakEvents();
+    });
+    const unsubscribeNetwork = networkMonitor.subscribe((isOnline) => {
+      if (isOnline) void loadBreakEvents();
+    });
+    return () => {
+      unsubscribeQueue();
+      unsubscribeNetwork();
+    };
+  }, [loadBreakEvents]);
+
   const breakSummary = useMemo(() => {
     return summarizeBreakAllowance(breakEvents, nowMs);
   }, [breakEvents, nowMs]);
 
-  const endBreakWithAllowanceMetadata = useCallback(
-    async () => {
-      if (!activeShift?.id) {
-        return { status: 'error' as const, error: 'Cannot end break without an active shift.' };
+  // Records a break event, preferring the live RPC but falling back to the
+  // offline queue when there is no connection (or the RPC fails on a flaky one),
+  // so breaks are never lost and the timer keeps working without a network.
+  const recordBreakEvent = useCallback(
+    async (
+      eventType: BreakEventType
+    ): Promise<{ status: 'sent' | 'queued' | 'error'; error?: string }> => {
+      const shiftId = activeShift?.id;
+      if (!shiftId) {
+        return { status: 'error', error: 'Cannot record break without an active shift.' };
       }
 
-      const rpcResult = await rpcEndBreak({ p_shift_id: activeShift.id });
-      return rpcResult.ok
-        ? ({ status: 'sent' as const } as const)
-        : ({ status: 'error' as const, error: rpcResult.error } as const);
+      const online = await networkMonitor.isOnline();
+      if (online) {
+        const rpcResult =
+          eventType === 'break_start'
+            ? await rpcStartBreak({ p_shift_id: shiftId })
+            : await rpcEndBreak({ p_shift_id: shiftId });
+        if (rpcResult.ok) {
+          return { status: 'sent' };
+        }
+        // Online but the server rejected it (has a code) — surface the real error
+        // instead of silently queuing, so a break never appears to save but doesn't.
+        if (!isTransportError(rpcResult.code, rpcResult.error)) {
+          return { status: 'error', error: rpcResult.error ?? 'The server rejected this break action.' };
+        }
+        console.warn('[Break] transport error, queuing offline', { eventType, error: rpcResult.error });
+      }
+
+      await offlineQueue.addEvent(eventType, {
+        shift_id: shiftId,
+        event_type: eventType,
+        latitude: null,
+        longitude: null,
+        metadata: {},
+      });
+      return { status: 'queued' };
     },
     [activeShift?.id]
+  );
+
+  const endBreakWithAllowanceMetadata = useCallback(
+    () => recordBreakEvent('break_end'),
+    [recordBreakEvent]
   );
 
   useEffect(() => {
@@ -126,7 +207,7 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
     void (async () => {
       try {
           const result = await endBreakWithAllowanceMetadata();
-        if (result.status === 'sent') {
+        if (result.status !== 'error') {
           await loadBreakEvents();
           alert('Break allowance already used. Break ended automatically.');
         } else {
@@ -161,12 +242,15 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
     }
     setIsProcessing(true);
     try {
-      const rpcResult = await rpcStartBreak({ p_shift_id: activeShift.id });
-      if (rpcResult.ok) {
-        setAutoEndedForAllowance(false);
-        await loadBreakEvents();
-      } else {
-        alert(rpcResult.error ?? 'Failed to start break.');
+      const result = await recordBreakEvent('break_start');
+      if (result.status === 'error') {
+        alert(result.error ?? 'Failed to start break.');
+        return;
+      }
+      setAutoEndedForAllowance(false);
+      await loadBreakEvents();
+      if (result.status === 'queued') {
+        alert('You are offline. Break started and saved on this device — it will sync automatically.');
       }
     } finally {
       setIsProcessing(false);
@@ -187,11 +271,13 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
     setIsProcessing(true);
     try {
       const result = await endBreakWithAllowanceMetadata();
-      if (result.status === 'sent') {
-        await loadBreakEvents();
-      } else {
+      if (result.status === 'error') {
         alert(result.error ?? 'Failed to end break.');
         return;
+      }
+      await loadBreakEvents();
+      if (result.status === 'queued') {
+        alert('You are offline. Break ended and saved on this device — it will sync automatically.');
       }
     } finally {
       setIsProcessing(false);

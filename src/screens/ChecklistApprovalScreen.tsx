@@ -106,7 +106,7 @@ export default function ChecklistApprovalScreen(props: ScreenProps<'ChecklistApp
         <Text style={[styles.messageText, messageTextStyle(status)]}>
           {guidanceMessage(status)}
         </Text>
-        {status === 'rejected' && record?.admin_note ? (
+        {record?.admin_note && record.note_visible_to_driver ? (
           <Text style={styles.adminNote}>Admin note: {record.admin_note}</Text>
         ) : null}
       </View>

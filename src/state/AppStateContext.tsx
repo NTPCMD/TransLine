@@ -6,7 +6,7 @@ import { useDriver } from './DriverContext';
 import { useActiveAssignment } from './AssignmentContext';
 import { getAssignedVehicleForCurrentUser } from '../lib/assignment';
 import { getGpsFix } from '../lib/locationEvents';
-import { networkMonitor } from '../lib/networkMonitor';
+import { networkMonitor, isTransportError } from '../lib/networkMonitor';
 import { offlineQueue } from '../lib/offlineQueue';
 import {
   startShift as rpcStartShift,
@@ -896,20 +896,25 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     console.log('[OdometerValidation] vehicleId', { vehicleId: assignmentVehicleId });
     console.log('[OdometerValidation] typedStart', { typedStart: odometerValue });
-    const latestVehicleOdometerResult = await getLatestVehicleOdometerKm(assignmentVehicleId);
-    if (latestVehicleOdometerResult.error) {
-      return { shiftId: null, error: `Unable to validate odometer history: ${latestVehicleOdometerResult.error}` };
-    }
+    // Odometer history lives server-side, so this check only runs when online.
+    // Offline the shift is queued and the reading is re-validated on sync.
+    const onlineForValidation = await networkMonitor.isOnline();
+    if (onlineForValidation) {
+      const latestVehicleOdometerResult = await getLatestVehicleOdometerKm(assignmentVehicleId);
+      if (latestVehicleOdometerResult.error) {
+        return { shiftId: null, error: `Unable to validate odometer history: ${latestVehicleOdometerResult.error}` };
+      }
 
-    const latestVehicleOdometer = latestVehicleOdometerResult.value;
-    console.log('[OdometerValidation] latestVehicleOdometer', { latestVehicleOdometer });
-    if (latestVehicleOdometer !== null && odometerValue < latestVehicleOdometer) {
-      const latestDisplay = Number.isInteger(latestVehicleOdometer)
-        ? `${latestVehicleOdometer}`
-        : latestVehicleOdometer.toFixed(1);
-      const message = `Odometer cannot be less than the vehicle's last recorded reading of ${latestDisplay} km.`;
-      console.warn('[OdometerValidation] blocked reason', { reason: message });
-      return { shiftId: null, error: message };
+      const latestVehicleOdometer = latestVehicleOdometerResult.value;
+      console.log('[OdometerValidation] latestVehicleOdometer', { latestVehicleOdometer });
+      if (latestVehicleOdometer !== null && odometerValue < latestVehicleOdometer) {
+        const latestDisplay = Number.isInteger(latestVehicleOdometer)
+          ? `${latestVehicleOdometer}`
+          : latestVehicleOdometer.toFixed(1);
+        const message = `Odometer cannot be less than the vehicle's last recorded reading of ${latestDisplay} km.`;
+        console.warn('[OdometerValidation] blocked reason', { reason: message });
+        return { shiftId: null, error: message };
+      }
     }
 
     if (!odometerPhoto) {
@@ -1024,27 +1029,32 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     console.log('[StartShift] startShift result', { shiftId, queued: queued ?? false, driverId: driverId ?? null });
 
-    console.log('[Checklist] saving to shifts.checklist');
-    console.log('[Checklist] shiftId', { shiftId });
-    console.log('[Checklist] payload', checklistPayload);
-    const { error: checklistSaveError } = await supabase
-      .from('shifts')
-      .update({
-        vehicle_id: assignmentVehicleId,
-        checklist: checklistPayload,
-      })
-      .eq('id', shiftId);
+    // When offline the shift itself is queued (no server row yet), and the
+    // queued start_shift RPC already carries the checklist payload — so only
+    // write shifts.checklist directly when we have a live server shift.
+    if (isOnline && !queued) {
+      console.log('[Checklist] saving to shifts.checklist');
+      console.log('[Checklist] shiftId', { shiftId });
+      console.log('[Checklist] payload', checklistPayload);
+      const { error: checklistSaveError } = await supabase
+        .from('shifts')
+        .update({
+          vehicle_id: assignmentVehicleId,
+          checklist: checklistPayload,
+        })
+        .eq('id', shiftId);
 
-    if (checklistSaveError) {
-      console.error('[Checklist] error', {
-        shiftId,
-        payload: checklistPayload,
-        message: checklistSaveError.message,
-      });
-      return { shiftId: null, error: `Checklist save failed: ${checklistSaveError.message}` };
+      if (checklistSaveError) {
+        console.error('[Checklist] error', {
+          shiftId,
+          payload: checklistPayload,
+          message: checklistSaveError.message,
+        });
+        return { shiftId: null, error: `Checklist save failed: ${checklistSaveError.message}` };
+      }
+
+      console.log('[Checklist] success', { shiftId });
     }
-
-    console.log('[Checklist] success', { shiftId });
 
     let photoPath: string | null = null;
     let odometerStartQueued = queued ?? false;
@@ -1245,42 +1255,46 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: 'No active shift found.' };
     }
 
-    const { data: startEvents, error: startEventError } = await supabase
-      .from('shift_events')
-      .select('event_type, metadata, created_at')
-      .eq('shift_id', activeShiftId)
-      .in('event_type', ['odometer_start', 'shift_start'])
-      .order('created_at', { ascending: false })
-      .limit(5);
-
-    if (startEventError) {
-      return { ok: false, error: `Unable to validate start odometer: ${startEventError.message}` };
-    }
-
-    const startOdometer = (startEvents ?? []).reduce<number | null>((current, event) => {
-      if (!event?.metadata || typeof event.metadata !== 'object') return current;
-      const metadata = event.metadata as Record<string, unknown>;
-      const rawValue = metadata.odometer_value;
-      const numericValue =
-        typeof rawValue === 'number'
-          ? rawValue
-          : typeof rawValue === 'string'
-            ? Number(rawValue)
-            : NaN;
-      if (Number.isFinite(numericValue)) {
-        return current === null ? numericValue : current;
-      }
-      return current;
-    }, null);
-
-    if (startOdometer !== null && payload.endOdometerValue < startOdometer) {
-      return {
-        ok: false,
-        error: `End odometer cannot be less than the start odometer (${startOdometer}).`,
-      };
-    }
-
     const isOnline = await networkMonitor.isOnline();
+
+    // The start-odometer cross-check reads server history, so it only runs when
+    // online. Offline, the end-of-shift details are queued and reconciled later.
+    if (isOnline) {
+      const { data: startEvents, error: startEventError } = await supabase
+        .from('shift_events')
+        .select('event_type, metadata, created_at')
+        .eq('shift_id', activeShiftId)
+        .in('event_type', ['odometer_start', 'shift_start'])
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      if (startEventError) {
+        return { ok: false, error: `Unable to validate start odometer: ${startEventError.message}` };
+      }
+
+      const startOdometer = (startEvents ?? []).reduce<number | null>((current, event) => {
+        if (!event?.metadata || typeof event.metadata !== 'object') return current;
+        const metadata = event.metadata as Record<string, unknown>;
+        const rawValue = metadata.odometer_value;
+        const numericValue =
+          typeof rawValue === 'number'
+            ? rawValue
+            : typeof rawValue === 'string'
+              ? Number(rawValue)
+              : NaN;
+        if (Number.isFinite(numericValue)) {
+          return current === null ? numericValue : current;
+        }
+        return current;
+      }, null);
+
+      if (startOdometer !== null && payload.endOdometerValue < startOdometer) {
+        return {
+          ok: false,
+          error: `End odometer cannot be less than the start odometer (${startOdometer}).`,
+        };
+      }
+    }
 
     // Upload post-shift photo to the odometer_photos bucket
     console.log('[photoUpload] endShift: uploading odometer photo', { shiftId: activeShiftId, userId: resolvedUserId });
@@ -1306,12 +1320,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     let queued = false;
 
-    if (photoError || !uploadedPhotoPath) {
-      console.error('[EndShift] error', {
-        shiftId: activeShiftId,
-        error: photoError ?? 'no path returned',
-        bucket: 'odometer_photos',
-      });
+    if (!isOnline) {
+      // Genuinely offline: queue the odometer reading + end_shift RPC and finalize
+      // the shift locally. This is the only path that legitimately shows "Saved offline".
       await offlineQueue.addEvent('odometer_end', {
         shift_id: activeShiftId,
         event_type: 'odometer_end',
@@ -1319,67 +1330,6 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         longitude: payload.location.lng,
         metadata: odometerEndMetadata,
       });
-      queued = true;
-    } else if (!isOnline) {
-      await offlineQueue.addEvent('odometer_end', {
-        shift_id: activeShiftId,
-        event_type: 'odometer_end',
-        latitude: payload.location.lat,
-        longitude: payload.location.lng,
-        metadata: odometerEndMetadata,
-      });
-      queued = true;
-    } else {
-      const { error: shiftEventError } = await supabase.from('shift_events').insert({
-        shift_id: activeShiftId,
-        event_type: 'odometer_end',
-        latitude: payload.location.lat,
-        longitude: payload.location.lng,
-        metadata: odometerEndMetadata,
-      });
-
-      if (shiftEventError) {
-        console.error('[EndShift] error', {
-          shiftId: activeShiftId,
-          error: shiftEventError.message,
-          code: shiftEventError.code ?? 'n/a',
-          details: shiftEventError.details ?? 'n/a',
-          hint: shiftEventError.hint ?? 'n/a',
-        });
-        await offlineQueue.addEvent('odometer_end', {
-          shift_id: activeShiftId,
-          event_type: 'odometer_end',
-          latitude: payload.location.lat,
-          longitude: payload.location.lng,
-          metadata: {
-            ...odometerEndMetadata,
-            insert_error: shiftEventError.message,
-          },
-        });
-        queued = true;
-      }
-    }
-
-    console.log('[EndShift] success', {
-      shiftId: activeShiftId,
-      step: 'odometer_end_event_inserted',
-      odometerValue: payload.endOdometerValue,
-    });
-
-    let rpcOk = false;
-    let rpcError: string | undefined;
-
-    if (isOnline) {
-      const rpcResult = await rpcEndShift({
-        p_shift_id: activeShiftId,
-        p_end_lat: payload.location.lat,
-        p_end_lng: payload.location.lng,
-      });
-      rpcOk = rpcResult.ok;
-      rpcError = rpcResult.error;
-    }
-
-    if (!isOnline || !rpcOk) {
       await queueWrite({
         id: `${Date.now()}-end-shift`,
         type: 'rpc_call',
@@ -1391,12 +1341,88 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         },
       });
       queued = true;
+    } else {
+      // Online: every step must genuinely succeed. A real server/upload rejection is
+      // surfaced to the driver (they stay on End Shift and retry) instead of being
+      // hidden behind "Saved offline" while the shift never actually ends.
+      if (photoError || !uploadedPhotoPath) {
+        console.error('[EndShift] odometer photo upload failed while online', {
+          shiftId: activeShiftId,
+          error: photoError ?? 'no path returned',
+        });
+        return {
+          ok: false,
+          error: `Could not upload the final odometer photo.${photoError ? ` ${photoError}` : ''} Please check your connection and try again.`,
+        };
+      }
+
+      const { error: shiftEventError } = await supabase.from('shift_events').insert({
+        shift_id: activeShiftId,
+        event_type: 'odometer_end',
+        latitude: payload.location.lat,
+        longitude: payload.location.lng,
+        metadata: odometerEndMetadata,
+      });
+
+      if (shiftEventError) {
+        console.error('[EndShift] odometer_end insert error', {
+          shiftId: activeShiftId,
+          error: shiftEventError.message,
+          code: shiftEventError.code ?? 'n/a',
+        });
+        if (!isTransportError(shiftEventError.code, shiftEventError.message)) {
+          return { ok: false, error: `Could not save the final odometer reading: ${shiftEventError.message}` };
+        }
+        // Connectivity dropped mid-request — queue and finalize locally.
+        await offlineQueue.addEvent('odometer_end', {
+          shift_id: activeShiftId,
+          event_type: 'odometer_end',
+          latitude: payload.location.lat,
+          longitude: payload.location.lng,
+          metadata: { ...odometerEndMetadata, insert_error: shiftEventError.message },
+        });
+        await queueWrite({
+          id: `${Date.now()}-end-shift`,
+          type: 'rpc_call',
+          name: 'end_shift',
+          params: {
+            p_shift_id: activeShiftId,
+            p_end_lat: payload.location.lat,
+            p_end_lng: payload.location.lng,
+          },
+        });
+        queued = true;
+      } else {
+        const rpcResult = await rpcEndShift({
+          p_shift_id: activeShiftId,
+          p_end_lat: payload.location.lat,
+          p_end_lng: payload.location.lng,
+        });
+        if (!rpcResult.ok) {
+          console.error('[EndShift] end_shift RPC failed', {
+            error: rpcResult.error,
+            code: rpcResult.code ?? 'n/a',
+          });
+          if (!isTransportError(rpcResult.code, rpcResult.error)) {
+            return { ok: false, error: rpcResult.error ?? 'Unable to end shift. Please try again.' };
+          }
+          await queueWrite({
+            id: `${Date.now()}-end-shift`,
+            type: 'rpc_call',
+            name: 'end_shift',
+            params: {
+              p_shift_id: activeShiftId,
+              p_end_lat: payload.location.lat,
+              p_end_lng: payload.location.lng,
+            },
+          });
+          queued = true;
+        }
+      }
     }
 
-    console.log('[EndShift] success OR error', {
+    console.log('[EndShift] finalizing', {
       shiftId: activeShiftId,
-      ok: rpcOk,
-      error: rpcError ?? null,
       queued,
     });
 
@@ -1467,8 +1493,33 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       if (!shiftId) {
         result = { status: 'error', error: 'Cannot close break without an active shift.' };
       } else {
-        const rpcResult = await rpcEndBreak({ p_shift_id: shiftId });
-        result = rpcResult.ok ? { status: 'sent' } : { status: 'error', error: rpcResult.error };
+        const online = await networkMonitor.isOnline();
+        const rpcResult = online
+          ? await rpcEndBreak({ p_shift_id: shiftId })
+          : { ok: false as const, error: undefined, code: undefined };
+
+        if (rpcResult.ok) {
+          result = { status: 'sent' };
+        } else if (online && !isTransportError(rpcResult.code, rpcResult.error)) {
+          // Online and the server rejected it — surface the real error and leave
+          // the break open so the driver can act, rather than masking as offline.
+          return {
+            closed: false,
+            durationSeconds: totalSeconds,
+            result: { status: 'error' as const, error: rpcResult.error ?? 'Could not end the active break.' },
+          };
+        } else {
+          // Offline (or a transport drop): queue the break_end so the break is
+          // closed server-side once connectivity returns.
+          await offlineQueue.addEvent('break_end', {
+            shift_id: shiftId,
+            event_type: 'break_end',
+            latitude: null,
+            longitude: null,
+            metadata: {},
+          });
+          result = { status: 'queued' };
+        }
       }
 
       updateAppState({ isOnBreak: false, breakStartedAt: null, breakAccumulatedSeconds: 0 });

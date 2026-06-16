@@ -6,6 +6,7 @@ export interface ChecklistApprovalRecord {
   id: string;
   status: ApprovalStatus;
   admin_note: string | null;
+  note_visible_to_driver: boolean;
   created_at: string;
 }
 
@@ -85,9 +86,12 @@ export async function requestChecklistApproval(params: {
 export async function fetchChecklistApprovalStatus(
   approvalRequestId: string
 ): Promise<{ record: ChecklistApprovalRecord | null; error: string | null }> {
+  // Select * (rather than naming note_visible_to_driver) so the app still works
+  // if the note-visibility migration has not been applied to the database yet;
+  // the flag simply defaults to false until the column exists.
   const { data, error } = await supabase
     .from('checklist_approval_requests')
-    .select('id, status, admin_note, created_at')
+    .select('*')
     .eq('id', approvalRequestId)
     .maybeSingle();
 
@@ -100,5 +104,13 @@ export async function fetchChecklistApprovalStatus(
     return { record: null, error: 'Approval request not found.' };
   }
 
-  return { record: data as ChecklistApprovalRecord, error: null };
+  const record: ChecklistApprovalRecord = {
+    id: String((data as Record<string, unknown>).id ?? approvalRequestId),
+    status: ((data as Record<string, unknown>).status as ApprovalStatus) ?? 'pending',
+    admin_note: ((data as Record<string, unknown>).admin_note as string | null) ?? null,
+    note_visible_to_driver: Boolean((data as Record<string, unknown>).note_visible_to_driver),
+    created_at: ((data as Record<string, unknown>).created_at as string) ?? new Date().toISOString(),
+  };
+
+  return { record, error: null };
 }
