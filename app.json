@@ -30,7 +30,9 @@
           "locationAlwaysAndWhenInUsePermission": "TransLine needs your location to track your shift routes and ensure driver safety.",
           "locationAlwaysPermission": "TransLine needs background location access to track your routes during active shifts.",
           "locationWhenInUsePermission": "TransLine needs your location to track your shift routes.",
-          "isIosBackgroundLocationEnabled": true
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
         }
       ],
       [
@@ -78,6 +80,8 @@
         "ACCESS_COARSE_LOCATION",
         "ACCESS_FINE_LOCATION",
         "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
         "WRITE_EXTERNAL_STORAGE",

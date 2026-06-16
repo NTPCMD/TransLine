@@ -13,6 +13,7 @@ import { useDriver } from '../state/DriverContext';
 import type { ScreenProps } from '../types/navigation';
 import { useActiveShift } from '../state/ActiveShiftContext';
 import { setDriverOffline, setDriverOnline } from '../lib/presence';
+import { requestTrackingPermissions, startBackgroundLocationTracking } from '../lib/backgroundLocation';
 
 const SAMPLE_INTERVAL_MS = 3 * 60 * 1000;
 const HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
@@ -310,12 +311,34 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
   // Request permissions on mount
   useEffect(() => { void updatePermissionStatus(true); }, []);
 
+  // Auto-start tracking as soon as permission is granted (e.g. the user grants
+  // it after the shift was already active), so the driver never has to tap
+  // "Request GPS Permissions" to begin tracking.
+  useEffect(() => {
+    if (
+      permissionStatus === Location.PermissionStatus.GRANTED &&
+      activeShift?.id &&
+      !pollingIntervalRef.current
+    ) {
+      void (async () => {
+        await pollAndSyncLocation(activeShift.id);
+        if (!pollingIntervalRef.current) startPollingLoop(activeShift.id);
+      })();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [permissionStatus, activeShift?.id]);
+
   const handleRequestPermissions = async () => {
-    const { status } = await Location.requestForegroundPermissionsAsync();
-    setPermissionStatus(status);
-    if (status === Location.PermissionStatus.GRANTED && activeShift?.id) {
+    // Request foreground + background ("Always") so tracking continues when the
+    // app is closed. Background is optional — foreground tracking starts either way.
+    const perms = await requestTrackingPermissions();
+    await updatePermissionStatus();
+    if (perms.foreground && activeShift?.id) {
       await pollAndSyncLocation(activeShift.id);
-      startPollingLoop(activeShift.id);
+      if (!pollingIntervalRef.current) startPollingLoop(activeShift.id);
+      if (perms.background) {
+        void startBackgroundLocationTracking(activeShift.id);
+      }
     }
   };
 
@@ -389,7 +412,7 @@ export default function ActiveShiftScreen({ navigation }: ScreenProps<'ActiveShi
             <Text style={styles.statusValue}>{trackingReason}</Text>
           </View>
           <View style={styles.buttonRow}>
-            <Button label="Request GPS Permissions" variant="secondary" onPress={handleRequestPermissions} />
+            <Button label="Enable GPS Tracking (Always)" variant="secondary" onPress={handleRequestPermissions} />
             <Button label="Refresh Location" variant="ghost" onPress={handleRefreshLocation} />
           </View>
         </InfoCard>
