@@ -86,9 +86,12 @@ export async function requestChecklistApproval(params: {
 export async function fetchChecklistApprovalStatus(
   approvalRequestId: string
 ): Promise<{ record: ChecklistApprovalRecord | null; error: string | null }> {
+  // Select * (rather than naming note_visible_to_driver) so the app still works
+  // if the note-visibility migration has not been applied to the database yet;
+  // the flag simply defaults to false until the column exists.
   const { data, error } = await supabase
     .from('checklist_approval_requests')
-    .select('id, status, admin_note, note_visible_to_driver, created_at')
+    .select('*')
     .eq('id', approvalRequestId)
     .maybeSingle();
 
