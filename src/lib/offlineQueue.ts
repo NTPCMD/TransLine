@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { AppState, AppStateStatus } from 'react-native';
 import { supabase } from './supabase';
 import { networkMonitor } from './networkMonitor';
-import { uploadFuelReceipt } from './photoUpload';
+import { uploadFuelReceipt, uploadShiftPhoto } from './photoUpload';
 
 const QUEUE_STORAGE_KEY = 'transline:offlineQueue';
 const RETRY_INTERVAL_MS = 30_000;
@@ -365,33 +365,51 @@ class OfflineQueue {
    * upload it now and swap in the resulting storage path before inserting.
    */
   private async buildInsertPayload(item: QueuedEvent): Promise<QueuedShiftEventPayload> {
-    if (item.payload.event_type !== 'fuel_log') {
-      return item.payload;
-    }
-
+    const eventType = item.payload.event_type;
     const metadata = { ...item.payload.metadata } as Record<string, unknown>;
-    const localUri = typeof metadata.local_receipt_uri === 'string' ? metadata.local_receipt_uri : '';
-    const existingPath =
-      typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
 
-    if (!localUri || existingPath) {
-      return item.payload;
+    if (eventType === 'fuel_log') {
+      const localUri = typeof metadata.local_receipt_uri === 'string' ? metadata.local_receipt_uri : '';
+      const existingPath =
+        typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
+      if (!localUri || existingPath) return item.payload;
+
+      const userId = await this.requireUserId('fuel receipt');
+      const { path, error } = await uploadFuelReceipt(item.payload.shift_id, localUri, userId);
+      if (error || !path) {
+        throw new Error(error ?? 'Queued fuel receipt upload failed.');
+      }
+      delete metadata.local_receipt_uri;
+      metadata.receipt_photo_path = path;
+      return { ...item.payload, metadata };
     }
 
+    if (eventType === 'odometer_start' || eventType === 'odometer_end') {
+      const localUri = typeof metadata.local_photo_uri === 'string' ? metadata.local_photo_uri : '';
+      const existingPath = typeof metadata.photo_path === 'string' ? metadata.photo_path.trim() : '';
+      if (!localUri || existingPath) return item.payload;
+
+      const userId = await this.requireUserId('odometer photo');
+      const type = eventType === 'odometer_start' ? 'pre' : 'post';
+      const { path, error } = await uploadShiftPhoto(item.payload.shift_id, type, localUri, userId);
+      if (error || !path) {
+        throw new Error(error ?? 'Queued odometer photo upload failed.');
+      }
+      delete metadata.local_photo_uri;
+      metadata.photo_path = path;
+      return { ...item.payload, metadata };
+    }
+
+    return item.payload;
+  }
+
+  private async requireUserId(label: string): Promise<string> {
     const { data } = await supabase.auth.getUser();
     const userId = data?.user?.id ?? null;
     if (!userId) {
-      throw new Error('Cannot upload queued fuel receipt: no authenticated user.');
+      throw new Error(`Cannot upload queued ${label}: no authenticated user.`);
     }
-
-    const { path, error } = await uploadFuelReceipt(item.payload.shift_id, localUri, userId);
-    if (error || !path) {
-      throw new Error(error ?? 'Queued fuel receipt upload failed.');
-    }
-
-    delete metadata.local_receipt_uri;
-    metadata.receipt_photo_path = path;
-    return { ...item.payload, metadata };
+    return userId;
   }
 
   async retryNow(): Promise<void> {
