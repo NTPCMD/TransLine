@@ -1,4 +1,6 @@
 import { supabase } from './supabase';
+import { decode as decodeBase64 } from 'base64-arraybuffer';
+import * as FileSystem from 'expo-file-system/legacy';
 
 export type StorageErrorDetails = {
   message: string;
@@ -77,6 +79,27 @@ function extractStorageErrorDetails(bucket: string, path: string, error: unknown
 }
 
 /**
+ * Reads a captured photo (a file:// URI or a data: URI) into an ArrayBuffer.
+ * React Native cannot reliably upload a Blob to Supabase Storage — Blobs built
+ * from local files fail the upload with "Network request failed" on-device — so
+ * we upload an ArrayBuffer decoded from base64 instead, which works reliably.
+ */
+async function readPhotoAsArrayBuffer(photoUri: string): Promise<ArrayBuffer> {
+  let base64: string;
+  if (photoUri.startsWith('data:')) {
+    base64 = photoUri.split(',')[1] ?? '';
+  } else {
+    base64 = await FileSystem.readAsStringAsync(photoUri, {
+      encoding: FileSystem.EncodingType.Base64,
+    });
+  }
+  if (!base64) {
+    throw new Error('Photo is empty or could not be read.');
+  }
+  return decodeBase64(base64);
+}
+
+/**
  * Upload a driver log photo to the driver_log_photos bucket.
  * Path: {userId}/{shiftId|unassigned}/{timestamp}.jpg
  */
@@ -96,26 +119,9 @@ export async function uploadDriverLogPhoto(
   const BUCKET = 'driver_log_photos';
 
   console.log('[photoUpload] preparing driver log blob', { bucket: BUCKET, path: storagePath });
-  let blob: Blob;
+  let fileBody: ArrayBuffer;
   try {
-    if (photoUri.startsWith('data:')) {
-      const parts = photoUri.split(',');
-      const mimeMatch = parts[0].match(/:(.*?);/);
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-      const bstr = atob(parts[1]);
-      const n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      for (let i = 0; i < n; i++) {
-        u8arr[i] = bstr.charCodeAt(i);
-      }
-      blob = new Blob([u8arr], { type: mimeType });
-    } else {
-      const resp = await fetch(photoUri);
-      if (!resp.ok) {
-        throw new Error(`Failed to fetch photo: ${resp.status} ${resp.statusText}`);
-      }
-      blob = await resp.blob();
-    }
+    fileBody = await readPhotoAsArrayBuffer(photoUri);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { path: '', error: `Failed to process photo URI: ${msg}` };
@@ -124,7 +130,7 @@ export async function uploadDriverLogPhoto(
   console.log('[photoUpload] uploading driver log photo', { bucket: BUCKET, path: storagePath });
   const uploadResult = await supabase.storage
     .from(BUCKET)
-    .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: false });
+    .upload(storagePath, fileBody, { contentType: 'image/jpeg', upsert: false });
 
   const { data: uploadData, error: uploadError } = uploadResult;
   console.log('[photoUpload] driver log upload response', {
@@ -168,26 +174,9 @@ export async function uploadFuelReceipt(
   const BUCKET = 'fuel_receipts';
 
   console.log('[photoUpload] preparing fuel receipt blob', { bucket: BUCKET, path: storagePath });
-  let blob: Blob;
+  let fileBody: ArrayBuffer;
   try {
-    if (photoUri.startsWith('data:')) {
-      const parts = photoUri.split(',');
-      const mimeMatch = parts[0].match(/:(.*?);/);
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-      const bstr = atob(parts[1]);
-      const n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      for (let i = 0; i < n; i++) {
-        u8arr[i] = bstr.charCodeAt(i);
-      }
-      blob = new Blob([u8arr], { type: mimeType });
-    } else {
-      const resp = await fetch(photoUri);
-      if (!resp.ok) {
-        throw new Error(`Failed to fetch photo: ${resp.status} ${resp.statusText}`);
-      }
-      blob = await resp.blob();
-    }
+    fileBody = await readPhotoAsArrayBuffer(photoUri);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { path: '', error: `Failed to process photo URI: ${msg}` };
@@ -196,7 +185,7 @@ export async function uploadFuelReceipt(
   console.log('[photoUpload] uploading fuel receipt to bucket', BUCKET, 'path', storagePath);
   const uploadResult = await supabase.storage
     .from(BUCKET)
-    .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: false });
+    .upload(storagePath, fileBody, { contentType: 'image/jpeg', upsert: false });
 
   const { data: uploadData, error: uploadError } = uploadResult;
   console.log('[photoUpload] fuel receipt upload response', {
@@ -241,26 +230,9 @@ export async function uploadShiftPhoto(
   const BUCKET = 'odometer_photos';
 
   console.log('[photoUpload] preparing blob', { bucket: BUCKET, path: storagePath });
-  let blob: Blob;
+  let fileBody: ArrayBuffer;
   try {
-    if (photoUri.startsWith('data:')) {
-      const parts = photoUri.split(',');
-      const mimeMatch = parts[0].match(/:(.*?);/);
-      const mimeType = mimeMatch ? mimeMatch[1] : 'image/jpeg';
-      const bstr = atob(parts[1]);
-      const n = bstr.length;
-      const u8arr = new Uint8Array(n);
-      for (let i = 0; i < n; i++) {
-        u8arr[i] = bstr.charCodeAt(i);
-      }
-      blob = new Blob([u8arr], { type: mimeType });
-    } else {
-      const resp = await fetch(photoUri);
-      if (!resp.ok) {
-        throw new Error(`Failed to fetch photo: ${resp.status} ${resp.statusText}`);
-      }
-      blob = await resp.blob();
-    }
+    fileBody = await readPhotoAsArrayBuffer(photoUri);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { path: '', error: `Failed to process photo URI: ${msg}` };
@@ -269,7 +241,7 @@ export async function uploadShiftPhoto(
   console.log('[photoUpload] uploading to bucket', BUCKET, 'path', storagePath);
   const uploadResult = await supabase.storage
     .from(BUCKET)
-    .upload(storagePath, blob, { contentType: 'image/jpeg', upsert: false });
+    .upload(storagePath, fileBody, { contentType: 'image/jpeg', upsert: false });
 
   const { data: uploadData, error: uploadError } = uploadResult;
   console.log('[photoUpload] odometer upload response', {

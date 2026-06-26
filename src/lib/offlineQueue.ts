@@ -366,50 +366,68 @@ class OfflineQueue {
    */
   private async buildInsertPayload(item: QueuedEvent): Promise<QueuedShiftEventPayload> {
     const eventType = item.payload.event_type;
-    const metadata = { ...item.payload.metadata } as Record<string, unknown>;
 
     if (eventType === 'fuel_log') {
-      const localUri = typeof metadata.local_receipt_uri === 'string' ? metadata.local_receipt_uri : '';
-      const existingPath =
-        typeof metadata.receipt_photo_path === 'string' ? metadata.receipt_photo_path.trim() : '';
-      if (!localUri || existingPath) return item.payload;
-
-      const userId = await this.requireUserId('fuel receipt');
-      const { path, error } = await uploadFuelReceipt(item.payload.shift_id, localUri, userId);
-      if (error || !path) {
-        throw new Error(error ?? 'Queued fuel receipt upload failed.');
-      }
-      delete metadata.local_receipt_uri;
-      metadata.receipt_photo_path = path;
-      return { ...item.payload, metadata };
+      return this.attachQueuedPhoto(item, 'fuel receipt', 'local_receipt_uri', 'receipt_photo_path', (uid, uri) =>
+        uploadFuelReceipt(item.payload.shift_id, uri, uid)
+      );
     }
 
     if (eventType === 'odometer_start' || eventType === 'odometer_end') {
-      const localUri = typeof metadata.local_photo_uri === 'string' ? metadata.local_photo_uri : '';
-      const existingPath = typeof metadata.photo_path === 'string' ? metadata.photo_path.trim() : '';
-      if (!localUri || existingPath) return item.payload;
-
-      const userId = await this.requireUserId('odometer photo');
       const type = eventType === 'odometer_start' ? 'pre' : 'post';
-      const { path, error } = await uploadShiftPhoto(item.payload.shift_id, type, localUri, userId);
-      if (error || !path) {
-        throw new Error(error ?? 'Queued odometer photo upload failed.');
-      }
-      delete metadata.local_photo_uri;
-      metadata.photo_path = path;
-      return { ...item.payload, metadata };
+      return this.attachQueuedPhoto(item, 'odometer photo', 'local_photo_uri', 'photo_path', (uid, uri) =>
+        uploadShiftPhoto(item.payload.shift_id, type, uri, uid)
+      );
     }
 
     return item.payload;
   }
 
-  private async requireUserId(label: string): Promise<string> {
+  /**
+   * Uploads a photo captured offline and swaps its local URI for the storage path
+   * before the event is inserted. Best-effort: a connectivity failure throws so
+   * the whole event retries when back online, but a permanent failure (e.g. the
+   * cached photo file was cleared) inserts the event WITHOUT the photo so the
+   * reading never gets stuck in the queue forever.
+   */
+  private async attachQueuedPhoto(
+    item: QueuedEvent,
+    label: string,
+    localKey: string,
+    pathKey: string,
+    upload: (userId: string, uri: string) => Promise<{ path: string; error?: string }>
+  ): Promise<QueuedShiftEventPayload> {
+    const metadata = { ...item.payload.metadata } as Record<string, unknown>;
+    const localUri = typeof metadata[localKey] === 'string' ? (metadata[localKey] as string) : '';
+    const existingPath = typeof metadata[pathKey] === 'string' ? (metadata[pathKey] as string).trim() : '';
+    if (!localUri || existingPath) return item.payload;
+
     const { data } = await supabase.auth.getUser();
     const userId = data?.user?.id ?? null;
     if (!userId) {
+      // No session to upload/insert under — retry once authenticated.
       throw new Error(`Cannot upload queued ${label}: no authenticated user.`);
     }
-    return userId;
+
+    const { path, error } = await upload(userId, localUri);
+    if (path) {
+      delete metadata[localKey];
+      metadata[pathKey] = path;
+      return { ...item.payload, metadata };
+    }
+
+    // Connectivity failure → throw so the whole event retries when back online.
+    if (!error || /Network request failed|Failed to fetch|Load failed|timeout|timed out|ECONN|ENOTFOUND/i.test(error)) {
+      throw new Error(error ?? `Queued ${label} upload failed.`);
+    }
+
+    // Permanent failure (e.g. the cached photo file was cleared) — don't block the
+    // queue forever; insert the event without the photo so the reading still syncs.
+    console.warn(`[offlineQueue] ${label} could not be uploaded, syncing event without it`, { error });
+    delete metadata[localKey];
+    metadata[pathKey] = null;
+    metadata.upload_error = error;
+    return { ...item.payload, metadata };
   }
 
   async retryNow(): Promise<void> {
