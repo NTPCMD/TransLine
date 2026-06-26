@@ -42,7 +42,8 @@
           "cameraPermission": "TransLine needs camera access to capture odometer photos for shift documentation."
         }
       ],
-      "expo-system-ui"
+      "expo-system-ui",
+      "./plugins/withAndroidBuildMemory.js"
     ],
     "notification": {
       "icon": "./assets/notification-icon.png",
