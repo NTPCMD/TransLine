@@ -1,0 +1,39 @@
+name: Build Android APK (preview)
+
+# Manual trigger: Actions tab → "Build Android APK (preview)" → Run workflow.
+# Requires a repo secret named EXPO_TOKEN (Settings → Secrets and variables →
+# Actions → New repository secret). Builds the internal-distribution APK on EAS;
+# the build page (with Download + QR) is printed in the job log and on expo.dev.
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Branch, tag, or commit to build
+        required: false
+        default: claude/ecstatic-volta-okova0
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Setup EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Trigger Android APK build
+        run: eas build --platform android --profile preview --non-interactive --no-wait
