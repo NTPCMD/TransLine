@@ -109,28 +109,33 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
       const photo = await cameraRef.current.takePictureAsync({ quality: 0.6 });
       if (!photo?.uri) {
         Alert.alert('Photo failed', 'Unable to capture photo. Please try again.');
-        setIsCapturing(false);
         return;
       }
 
-      if (onCaptureMeta) {
-        let locationDenied = false;
-        let location: { lat: number | null; lng: number | null; accuracy: number | null } = {
-          lat: null,
-          lng: null,
-          accuracy: null,
-        };
-        try {
-          const fix = await getGpsFix();
-          location = { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };
-        } catch (e) {
-          locationDenied = true;
-        }
-        onCaptureMeta({ capturedAt, location, locationDenied });
-      }
-
+      // Show the photo and close the camera immediately — don't make the driver
+      // wait on a GPS fix (which can take several seconds). Resolve location in the
+      // background and deliver it via onCaptureMeta, which is ready well before they
+      // finish reviewing and submit.
       onChange(photo.uri);
       setShowCamera(false);
+
+      if (onCaptureMeta) {
+        void (async () => {
+          let locationDenied = false;
+          let location: { lat: number | null; lng: number | null; accuracy: number | null } = {
+            lat: null,
+            lng: null,
+            accuracy: null,
+          };
+          try {
+            const fix = await getGpsFix();
+            location = { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };
+          } catch (e) {
+            locationDenied = true;
+          }
+          onCaptureMeta({ capturedAt, location, locationDenied });
+        })();
+      }
     } catch (e) {
       console.warn(e);
       Alert.alert('Photo failed', 'Unable to capture photo. Please try again.');

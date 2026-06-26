@@ -47,11 +47,14 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       }
 
       const events = data ?? [];
-      const hasShiftEnd = events.some(
+      const hasPriorEnd = events.some(
         (event) => event.event_type === 'odometer_end' || event.event_type === 'shift_end'
       );
-      if (hasShiftEnd) {
-        setShiftLoadError('End odometer already captured.');
+      if (hasPriorEnd) {
+        // A previous end attempt recorded an end event but the shift is still active
+        // (the end_shift RPC never finished). Do NOT block — endShift is idempotent
+        // and will complete the unfinished shift. Blocking here traps the driver.
+        console.warn('[EndShift] prior unfinished end detected; allowing completion');
       }
 
       const shiftStartEvent =

@@ -1296,14 +1296,30 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
-    // Upload post-shift photo to the odometer_photos bucket
-    console.log('[photoUpload] endShift: uploading odometer photo', { shiftId: activeShiftId, userId: resolvedUserId });
-    const { path: uploadedPhotoPath, error: photoError } = await uploadShiftPhoto(
-      activeShiftId,
-      'post',
-      payload.endOdometerPhoto,
-      resolvedUserId
-    );
+    // Recover gracefully if a previous end attempt partially completed: the shift
+    // may already have an odometer_end / shift_end event yet never finalized (the
+    // end_shift RPC failed). Detect those so we neither duplicate nor get stuck.
+    let hasOdometerEnd = false;
+    let hasShiftEnd = false;
+    if (isOnline) {
+      const { data: existingEndEvents } = await supabase
+        .from('shift_events')
+        .select('event_type')
+        .eq('shift_id', activeShiftId)
+        .in('event_type', ['odometer_end', 'shift_end']);
+      hasOdometerEnd = (existingEndEvents ?? []).some((e) => e.event_type === 'odometer_end');
+      hasShiftEnd = (existingEndEvents ?? []).some((e) => e.event_type === 'shift_end');
+    }
+
+    // Upload the post-shift photo only if the odometer reading still needs recording.
+    let uploadedPhotoPath: string | null = null;
+    let photoError: string | null = null;
+    if (!hasOdometerEnd) {
+      console.log('[photoUpload] endShift: uploading odometer photo', { shiftId: activeShiftId, userId: resolvedUserId });
+      const uploaded = await uploadShiftPhoto(activeShiftId, 'post', payload.endOdometerPhoto, resolvedUserId);
+      uploadedPhotoPath = uploaded.path || null;
+      photoError = uploaded.error ?? null;
+    }
 
     const endShiftVehicleId = state.activeShiftVehicleId ?? state.vehicleId ?? null;
     const odometerEndMetadata = {
@@ -1318,19 +1334,36 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
       upload_error: photoError ?? null,
     } as Record<string, unknown>;
 
-    let queued = false;
+    // The end_shift RPC requires a shift_end event to already exist before it will
+    // finalize the shift ("shift cannot be completed without a shift_end event").
+    const shiftEndMetadata = {
+      captured_at: payload.capturedAt,
+      odometer_value: payload.endOdometerValue,
+      driver_id: driverRecordId,
+      vehicle_id: endShiftVehicleId,
+      shift_id: activeShiftId,
+    } as Record<string, unknown>;
 
-    if (!isOnline) {
-      // Genuinely offline: queue the odometer reading + end_shift RPC and finalize
-      // the shift locally. This is the only path that legitimately shows "Saved offline".
-      await offlineQueue.addEvent('odometer_end', {
+    const queueOdometerEnd = (extra?: Record<string, unknown>) =>
+      offlineQueue.addEvent('odometer_end', {
         shift_id: activeShiftId,
         event_type: 'odometer_end',
         latitude: payload.location.lat,
         longitude: payload.location.lng,
-        metadata: odometerEndMetadata,
+        metadata: extra ? { ...odometerEndMetadata, ...extra } : odometerEndMetadata,
       });
-      await queueWrite({
+
+    const queueShiftEndEvent = () =>
+      offlineQueue.addEvent('shift_end', {
+        shift_id: activeShiftId,
+        event_type: 'shift_end',
+        latitude: payload.location.lat,
+        longitude: payload.location.lng,
+        metadata: shiftEndMetadata,
+      });
+
+    const queueEndShiftRpc = () =>
+      queueWrite({
         id: `${Date.now()}-end-shift`,
         type: 'rpc_call',
         name: 'end_shift',
@@ -1340,59 +1373,88 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           p_end_lng: payload.location.lng,
         },
       });
+
+    let queued = false;
+
+    if (!isOnline) {
+      // Genuinely offline: queue the odometer reading, the required shift_end event,
+      // and the end_shift RPC, then finalize locally. Only this path legitimately
+      // shows "Saved offline".
+      await queueOdometerEnd();
+      await queueShiftEndEvent();
+      await queueEndShiftRpc();
       queued = true;
     } else {
-      // Online: every step must genuinely succeed. A real server/upload rejection is
-      // surfaced to the driver (they stay on End Shift and retry) instead of being
-      // hidden behind "Saved offline" while the shift never actually ends.
-      if (photoError || !uploadedPhotoPath) {
-        console.error('[EndShift] odometer photo upload failed while online', {
-          shiftId: activeShiftId,
-          error: photoError ?? 'no path returned',
-        });
-        return {
-          ok: false,
-          error: `Could not upload the final odometer photo.${photoError ? ` ${photoError}` : ''} Please check your connection and try again.`,
-        };
-      }
+      // Online: each step must genuinely succeed; real failures are surfaced so the
+      // driver can retry. Idempotent — anything a previous (failed) attempt already
+      // recorded is skipped, so an unfinished shift can be completed without
+      // duplicates and without getting stuck.
 
-      const { error: shiftEventError } = await supabase.from('shift_events').insert({
-        shift_id: activeShiftId,
-        event_type: 'odometer_end',
-        latitude: payload.location.lat,
-        longitude: payload.location.lng,
-        metadata: odometerEndMetadata,
-      });
-
-      if (shiftEventError) {
-        console.error('[EndShift] odometer_end insert error', {
-          shiftId: activeShiftId,
-          error: shiftEventError.message,
-          code: shiftEventError.code ?? 'n/a',
-        });
-        if (!isTransportError(shiftEventError.code, shiftEventError.message)) {
-          return { ok: false, error: `Could not save the final odometer reading: ${shiftEventError.message}` };
+      // 1) Final odometer reading (+ photo), unless already recorded.
+      if (!hasOdometerEnd) {
+        if (photoError || !uploadedPhotoPath) {
+          console.error('[EndShift] odometer photo upload failed while online', {
+            shiftId: activeShiftId,
+            error: photoError ?? 'no path returned',
+          });
+          return {
+            ok: false,
+            error: `Could not upload the final odometer photo.${photoError ? ` ${photoError}` : ''} Please check your connection and try again.`,
+          };
         }
-        // Connectivity dropped mid-request — queue and finalize locally.
-        await offlineQueue.addEvent('odometer_end', {
+
+        const { error: odometerError } = await supabase.from('shift_events').insert({
           shift_id: activeShiftId,
           event_type: 'odometer_end',
           latitude: payload.location.lat,
           longitude: payload.location.lng,
-          metadata: { ...odometerEndMetadata, insert_error: shiftEventError.message },
+          metadata: odometerEndMetadata,
         });
-        await queueWrite({
-          id: `${Date.now()}-end-shift`,
-          type: 'rpc_call',
-          name: 'end_shift',
-          params: {
-            p_shift_id: activeShiftId,
-            p_end_lat: payload.location.lat,
-            p_end_lng: payload.location.lng,
-          },
+
+        if (odometerError && !isTransportError(odometerError.code, odometerError.message)) {
+          console.error('[EndShift] odometer_end insert error', {
+            shiftId: activeShiftId,
+            error: odometerError.message,
+            code: odometerError.code ?? 'n/a',
+          });
+          return { ok: false, error: `Could not save the final odometer reading: ${odometerError.message}` };
+        }
+        if (odometerError) {
+          // Connectivity dropped mid-request — queue everything and finalize locally.
+          await queueOdometerEnd({ insert_error: odometerError.message });
+          if (!hasShiftEnd) await queueShiftEndEvent();
+          await queueEndShiftRpc();
+          queued = true;
+        }
+      }
+
+      // 2) shift_end event the RPC requires, unless already recorded.
+      if (!queued && !hasShiftEnd) {
+        const { error: shiftEndError } = await supabase.from('shift_events').insert({
+          shift_id: activeShiftId,
+          event_type: 'shift_end',
+          latitude: payload.location.lat,
+          longitude: payload.location.lng,
+          metadata: shiftEndMetadata,
         });
-        queued = true;
-      } else {
+
+        if (shiftEndError && !isTransportError(shiftEndError.code, shiftEndError.message)) {
+          console.error('[EndShift] shift_end insert error', {
+            shiftId: activeShiftId,
+            error: shiftEndError.message,
+            code: shiftEndError.code ?? 'n/a',
+          });
+          return { ok: false, error: `Could not record shift end: ${shiftEndError.message}` };
+        }
+        if (shiftEndError) {
+          await queueShiftEndEvent();
+          await queueEndShiftRpc();
+          queued = true;
+        }
+      }
+
+      // 3) Finalize via the end_shift RPC.
+      if (!queued) {
         const rpcResult = await rpcEndShift({
           p_shift_id: activeShiftId,
           p_end_lat: payload.location.lat,
@@ -1406,16 +1468,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           if (!isTransportError(rpcResult.code, rpcResult.error)) {
             return { ok: false, error: rpcResult.error ?? 'Unable to end shift. Please try again.' };
           }
-          await queueWrite({
-            id: `${Date.now()}-end-shift`,
-            type: 'rpc_call',
-            name: 'end_shift',
-            params: {
-              p_shift_id: activeShiftId,
-              p_end_lat: payload.location.lat,
-              p_end_lng: payload.location.lng,
-            },
-          });
+          await queueEndShiftRpc();
           queued = true;
         }
       }
