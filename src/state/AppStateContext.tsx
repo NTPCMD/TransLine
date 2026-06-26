@@ -1362,6 +1362,17 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         metadata: shiftEndMetadata,
       });
 
+    // The completion trigger also requires a location fix recorded at/after the
+    // shift_end event. Queued after shift_end so its created_at is later.
+    const queueEndLocation = () =>
+      offlineQueue.addEvent('location', {
+        shift_id: activeShiftId,
+        event_type: 'location',
+        latitude: payload.location.lat,
+        longitude: payload.location.lng,
+        metadata: { source: 'shift_end' },
+      });
+
     const queueEndShiftRpc = () =>
       queueWrite({
         id: `${Date.now()}-end-shift`,
@@ -1378,10 +1389,11 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
     if (!isOnline) {
       // Genuinely offline: queue the odometer reading, the required shift_end event,
-      // and the end_shift RPC, then finalize locally. Only this path legitimately
-      // shows "Saved offline".
+      // an end-location fix, and the end_shift RPC, then finalize locally. Only this
+      // path legitimately shows "Saved offline".
       await queueOdometerEnd();
       await queueShiftEndEvent();
+      await queueEndLocation();
       await queueEndShiftRpc();
       queued = true;
     } else {
@@ -1423,6 +1435,7 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           // Connectivity dropped mid-request — queue everything and finalize locally.
           await queueOdometerEnd({ insert_error: odometerError.message });
           if (!hasShiftEnd) await queueShiftEndEvent();
+          await queueEndLocation();
           await queueEndShiftRpc();
           queued = true;
         }
@@ -1448,6 +1461,33 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
         }
         if (shiftEndError) {
           await queueShiftEndEvent();
+          await queueEndLocation();
+          await queueEndShiftRpc();
+          queued = true;
+        }
+      }
+
+      // 2b) End-location fix recorded after shift_end. The completion trigger
+      //     requires a location event (lat/lng) at or after the shift_end event.
+      if (!queued) {
+        const { error: endLocationError } = await supabase.from('shift_events').insert({
+          shift_id: activeShiftId,
+          event_type: 'location',
+          latitude: payload.location.lat,
+          longitude: payload.location.lng,
+          metadata: { source: 'shift_end' },
+        });
+
+        if (endLocationError && !isTransportError(endLocationError.code, endLocationError.message)) {
+          console.error('[EndShift] end location insert error', {
+            shiftId: activeShiftId,
+            error: endLocationError.message,
+            code: endLocationError.code ?? 'n/a',
+          });
+          return { ok: false, error: `Could not record end location: ${endLocationError.message}` };
+        }
+        if (endLocationError) {
+          await queueEndLocation();
           await queueEndShiftRpc();
           queued = true;
         }
