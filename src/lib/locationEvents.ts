@@ -37,9 +37,29 @@ export async function getGpsFix(): Promise<GpsFix> {
     throw new Error('Location permission denied');
   }
 
-  const pos = await Location.getCurrentPositionAsync({
-    accuracy: Location.Accuracy.High,
-  });
+  // Fast path: reuse a recently cached fix. Shift tracking keeps this fresh, so
+  // it's near-instant and — unlike a fresh high-accuracy lock — works indoors
+  // instead of hanging while it waits for satellites.
+  try {
+    const lastKnown = await Location.getLastKnownPositionAsync({ maxAge: 5 * 60 * 1000 });
+    if (lastKnown) {
+      return {
+        latitude: lastKnown.coords.latitude,
+        longitude: lastKnown.coords.longitude,
+        accuracy: lastKnown.coords.accuracy ?? null,
+      };
+    }
+  } catch {
+    // fall through to a fresh fix
+  }
+
+  // Otherwise request a fresh fix, but cap the wait so it can never hang.
+  const pos = await Promise.race([
+    Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }),
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Location request timed out')), 8000)
+    ),
+  ]);
 
   return {
     latitude: pos.coords.latitude,

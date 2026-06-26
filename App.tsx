@@ -20,7 +20,7 @@ import { ActiveShiftProvider } from './src/state/ActiveShiftContext';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { isSupabaseConfigured } from './src/lib/supabase';
 
-const BUILD_STAMP = 'APP BUILD: transline-driver v2.0.4 (2026-06-22) endshift-complete';
+const BUILD_STAMP = 'APP BUILD: transline-driver v2.0.5 (2026-06-22) camera+gps-fix';
 
 import SplashScreen from './src/screens/SplashScreen';
 import LoginScreen from './src/screens/LoginScreen';
