@@ -20,7 +20,7 @@ import { ActiveShiftProvider } from './src/state/ActiveShiftContext';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { isSupabaseConfigured } from './src/lib/supabase';
 
-const BUILD_STAMP = 'APP BUILD: transline-driver v2.0.5 (2026-06-22) camera+gps-fix';
+const BUILD_STAMP = 'APP BUILD: transline-driver v2.0.6 (2026-06-22) low-end-perf';
 
 import SplashScreen from './src/screens/SplashScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -131,16 +131,18 @@ function AppContent() {
     sweepOpacity.value = 1;
     transitionMaskOpacity.value = 1;
 
+    // Kept short (was 3000ms) so the decorative sweep doesn't jank navigation on
+    // low-end phones — it now plays for a fraction of the time on every screen change.
     sweepX.value = withTiming(width, {
-      duration: 3000,
+      duration: 500,
       easing: Easing.bezier(0.22, 1, 0.36, 1),
     });
     sweepOpacity.value = withTiming(0, {
-      duration: 3000,
+      duration: 500,
       easing: Easing.linear,
     });
     transitionMaskOpacity.value = withTiming(0, {
-      duration: 3000,
+      duration: 500,
       easing: Easing.linear,
     });
   }, [sweepOpacity, sweepX, transitionMaskOpacity, width]);

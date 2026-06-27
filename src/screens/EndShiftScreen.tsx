@@ -87,8 +87,9 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
   };
 
   const handleNotesChange = (value: string) => {
+    // Keep typing on fast local state only — updating global app state on every
+    // keystroke re-rendered the whole tree and made typing lag on low-end phones.
     setEndShiftNotes(value);
-    updateAppState({ endShiftNotes: value });
   };
 
   const computeDistance = () => {
