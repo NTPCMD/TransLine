@@ -122,27 +122,30 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
         return;
       }
 
-      // Attach the location metadata BEFORE handing back the photo, so it is always
-      // present when the driver submits (no "metadata is missing" race). getGpsFix
-      // is fast now — it uses a recent cached fix and times out instead of hanging.
-      if (onCaptureMeta) {
-        let locationDenied = false;
-        let location: { lat: number | null; lng: number | null; accuracy: number | null } = {
-          lat: null,
-          lng: null,
-          accuracy: null,
-        };
-        try {
-          const fix = await getGpsFix();
-          location = { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy };
-        } catch (e) {
-          locationDenied = true;
-        }
-        onCaptureMeta({ capturedAt, location, locationDenied });
-      }
-
+      // Hand the photo back and close the camera immediately — don't make the
+      // capture button wait on GPS. A stale device location cache (e.g. at the
+      // end of a long shift) makes getGpsFix fall back to a live fix that can
+      // take several seconds; resolve it in the background instead and report
+      // it via onCaptureMeta as soon as it's ready.
       onChange(photo.uri);
       setShowCamera(false);
+
+      if (onCaptureMeta) {
+        getGpsFix()
+          .then((fix) => {
+            onCaptureMeta({
+              capturedAt,
+              location: { lat: fix.latitude, lng: fix.longitude, accuracy: fix.accuracy },
+            });
+          })
+          .catch(() => {
+            onCaptureMeta({
+              capturedAt,
+              location: { lat: null, lng: null, accuracy: null },
+              locationDenied: true,
+            });
+          });
+      }
     } catch (e) {
       console.warn(e);
       Alert.alert('Photo failed', 'Unable to capture photo. Please try again.');
