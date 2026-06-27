@@ -21,6 +21,7 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
   const [showCamera, setShowCamera] = useState(false);
   const [isCapturing, setIsCapturing] = useState(false);
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const cameraRef = useRef<CameraView | null>(null);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
@@ -98,15 +99,24 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
         return;
       }
     }
+    setIsCameraReady(false);
     setShowCamera(true);
   };
 
   const captureWithCamera = async () => {
-    if (!cameraRef.current || isCapturing) return;
+    if (!cameraRef.current || isCapturing || !isCameraReady) return;
     setIsCapturing(true);
     const capturedAt = new Date().toISOString();
     try {
-      const photo = await cameraRef.current.takePictureAsync({ quality: 0.6 });
+      // Some low-end devices never resolve takePictureAsync if the camera hiccups
+      // (e.g. backgrounded mid-capture). Race it so the button can't get stuck
+      // spinning forever — same pattern as the getGpsFix timeout below.
+      const photo = await Promise.race([
+        cameraRef.current.takePictureAsync({ quality: 0.6 }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Camera capture timed out')), 10000)
+        ),
+      ]);
       if (!photo?.uri) {
         Alert.alert('Photo failed', 'Unable to capture photo. Please try again.');
         return;
@@ -142,6 +152,7 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
   };
 
   const handleFlipCamera = () => {
+    setIsCameraReady(false);
     setCameraFacing((current) => (current === 'back' ? 'front' : 'back'));
   };
 
@@ -174,7 +185,12 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
       )}
       <Modal visible={showCamera} animationType="none">
         <View style={styles.cameraContainer}>
-          <CameraView ref={cameraRef} style={styles.cameraPreview} facing={cameraFacing} />
+          <CameraView
+            ref={cameraRef}
+            style={styles.cameraPreview}
+            facing={cameraFacing}
+            onCameraReady={() => setIsCameraReady(true)}
+          />
           <View style={styles.cameraControls}>
             <TouchableOpacity
               onPress={() => setShowCamera(false)}
@@ -193,9 +209,13 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
             <TouchableOpacity
               onPress={captureWithCamera}
               style={[styles.cameraButton, styles.captureButton]}
-              disabled={isCapturing}
+              disabled={isCapturing || !isCameraReady}
             >
-              {isCapturing ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.cameraButtonText}>Capture</Text>}
+              {isCapturing || !isCameraReady ? (
+                <ActivityIndicator color="#FFFFFF" />
+              ) : (
+                <Text style={styles.cameraButtonText}>Capture</Text>
+              )}
             </TouchableOpacity>
           </View>
         </View>
