@@ -152,7 +152,7 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
         <View style={styles.previewRow}>
           <Image source={{ uri }} style={styles.preview} />
           <View style={styles.previewActions}>
-            <TouchableOpacity onPress={() => pickImage(true)} style={styles.smallButton}>
+            <TouchableOpacity onPress={() => (cameraOnly ? openCamera() : pickImage(true))} style={styles.smallButton}>
               <Text style={styles.smallButtonText}>Retake</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => onChange(null)} style={[styles.smallButton, styles.removeButton]}>
@@ -162,7 +162,7 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
         </View>
       ) : (
         <View style={styles.pickRow}>
-          <TouchableOpacity onPress={() => pickImage(true)} style={styles.actionButton}>
+          <TouchableOpacity onPress={() => (cameraOnly ? openCamera() : pickImage(true))} style={styles.actionButton}>
             <Text style={styles.actionText}>Take photo</Text>
           </TouchableOpacity>
           {!cameraOnly ? (
@@ -172,7 +172,7 @@ export default function PhotoPicker({ uri, onChange, label, cameraOnly = false, 
           ) : null}
         </View>
       )}
-      <Modal visible={showCamera} animationType="slide">
+      <Modal visible={showCamera} animationType="none">
         <View style={styles.cameraContainer}>
           <CameraView ref={cameraRef} style={styles.cameraPreview} facing={cameraFacing} />
           <View style={styles.cameraControls}>

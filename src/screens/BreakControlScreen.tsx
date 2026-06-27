@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, View, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import ScreenContainer from '../components/ScreenContainer';
@@ -129,18 +129,23 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
 
   // Reconcile when the offline queue drains (a queued break synced) or the
   // network comes back, so server data replaces the optimistic local copy.
+  // Subscribe ONCE (via a ref to the latest loader) — re-subscribing whenever
+  // loadBreakEvents changed identity re-fired it on every render and made the
+  // Start Break button flicker.
+  const loadBreakEventsRef = useRef(loadBreakEvents);
+  loadBreakEventsRef.current = loadBreakEvents;
   useEffect(() => {
     const unsubscribeQueue = offlineQueue.subscribe(() => {
-      void loadBreakEvents();
+      void loadBreakEventsRef.current();
     });
     const unsubscribeNetwork = networkMonitor.subscribe((isOnline) => {
-      if (isOnline) void loadBreakEvents();
+      if (isOnline) void loadBreakEventsRef.current();
     });
     return () => {
       unsubscribeQueue();
       unsubscribeNetwork();
     };
-  }, [loadBreakEvents]);
+  }, []);
 
   const breakSummary = useMemo(() => {
     return summarizeBreakAllowance(breakEvents, nowMs);
@@ -313,7 +318,7 @@ export default function BreakControlScreen(props: ScreenProps<'BreakControl'>) {
 
         {!breakSummary.isOnBreak && (
           <View style={styles.buttonGroup}>
-            <Button label="Start Break" onPress={startBreak} disabled={isProcessing || activeShiftLoading || remainingSeconds <= 0} />
+            <Button label="Start Break" onPress={startBreak} disabled={isProcessing || !activeShift?.id || remainingSeconds <= 0} />
           </View>
         )}
 
