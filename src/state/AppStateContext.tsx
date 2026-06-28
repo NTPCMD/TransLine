@@ -298,13 +298,40 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
 
       if (error || !activeShift?.id) return;
 
-      const { data: startEvents } = await supabase
-        .from('shift_events')
-        .select('event_type, metadata, created_at')
-        .eq('shift_id', activeShift.id)
-        .in('event_type', ['odometer_start', 'shift_start'])
-        .order('created_at', { ascending: false })
-        .limit(5);
+      const [startEventsResult, breakEventsResult] = await Promise.all([
+        supabase
+          .from('shift_events')
+          .select('event_type, metadata, created_at')
+          .eq('shift_id', activeShift.id)
+          .in('event_type', ['odometer_start', 'shift_start'])
+          .order('created_at', { ascending: false })
+          .limit(5),
+        supabase
+          .from('shift_events')
+          .select('event_type, created_at')
+          .eq('shift_id', activeShift.id)
+          .in('event_type', ['break_start', 'break_end'])
+          .order('created_at', { ascending: true }),
+      ]);
+
+      const startEvents = startEventsResult.data;
+
+      // Recover any in-progress break (a break_start with no following break_end)
+      // so the End Shift flow closes it correctly after a cold reopen.
+      const breakEvents = (breakEventsResult.data ?? []) as Array<{
+        event_type: 'break_start' | 'break_end';
+        created_at: string;
+      }>;
+      const breakSummary = summarizeBreakAllowance(breakEvents, Date.now());
+      let openBreakStartedAt: string | null = null;
+      for (const event of breakEvents) {
+        if (event.event_type === 'break_start') openBreakStartedAt = event.created_at;
+        else if (event.event_type === 'break_end') openBreakStartedAt = null;
+      }
+      const completedBreakSeconds = Math.max(
+        0,
+        breakSummary.totalSeconds - breakSummary.currentSessionSeconds
+      );
 
       const startEvent =
         (startEvents ?? []).find((e) => e.event_type === 'odometer_start')
@@ -346,6 +373,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           startOdometerCapturedAt: prev.startOdometerCapturedAt ?? capturedAtRaw,
           startOdometerLat: prev.startOdometerLat ?? startLat,
           startOdometerLng: prev.startOdometerLng ?? startLng,
+          isOnBreak: prev.isOnBreak || breakSummary.isOnBreak,
+          breakStartedAt: prev.breakStartedAt ?? openBreakStartedAt,
+          breakAccumulatedSeconds: prev.breakAccumulatedSeconds || completedBreakSeconds,
         };
       });
     } catch (e) {
