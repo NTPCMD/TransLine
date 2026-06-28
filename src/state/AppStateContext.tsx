@@ -187,6 +187,9 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(initialState);
   const recentEventSubmissions = useRef<Map<string, number>>(new Map());
   const pendingEventSubmissions = useRef<Set<string>>(new Set());
+  // Tracks which driver we've already attempted active-shift rehydration for, so
+  // the cold-start recovery runs once per driver rather than looping.
+  const hydrationAttemptedRef = useRef<string | null>(null);
 
   const updateAppState = (updates: Partial<AppState>) => {
     setState(prev => ({ ...prev, ...updates }));
@@ -274,6 +277,92 @@ export function AppStateProvider({ children }: { children: React.ReactNode }) {
           : assignedVehicle?.rego ?? assignedVehicle?.plate_number ?? null,
     }));
   }, [authUserId, currentDriver, assignmentStatus, assignedVehicle]);
+
+  // Rehydrate the active-shift context from the server. AppState lives only in
+  // memory, so when the OS kills the app and the driver reopens it mid-shift, the
+  // start time / start odometer / activeShiftId are all lost — the End Shift screen
+  // then shows "Not set" / "Pending" and foreground location events have no shift_id.
+  // This pulls the live shift (and its odometer_start event) back into state so every
+  // screen and the distance calc display correctly again. It never clobbers an
+  // in-progress local shift or a shift that was just completed in this session.
+  const hydrateActiveShiftFromServer = useCallback(async (driverRecordId: string) => {
+    try {
+      const { data: activeShift, error } = await supabase
+        .from('shifts')
+        .select('id, vehicle_id, started_at, ended_at, status')
+        .eq('driver_id', driverRecordId)
+        .is('ended_at', null)
+        .order('started_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error || !activeShift?.id) return;
+
+      const { data: startEvents } = await supabase
+        .from('shift_events')
+        .select('event_type, metadata, created_at')
+        .eq('shift_id', activeShift.id)
+        .in('event_type', ['odometer_start', 'shift_start'])
+        .order('created_at', { ascending: false })
+        .limit(5);
+
+      const startEvent =
+        (startEvents ?? []).find((e) => e.event_type === 'odometer_start')
+        ?? (startEvents ?? []).find((e) => e.event_type === 'shift_start');
+      const meta =
+        startEvent?.metadata && typeof startEvent.metadata === 'object'
+          ? (startEvent.metadata as Record<string, unknown>)
+          : null;
+      const rawOdometer = meta?.odometer_value;
+      const odometerNumber =
+        typeof rawOdometer === 'number'
+          ? rawOdometer
+          : typeof rawOdometer === 'string'
+            ? Number(rawOdometer)
+            : NaN;
+      const odometerReading = Number.isFinite(odometerNumber) ? String(odometerNumber) : '';
+      const capturedAtRaw = typeof meta?.captured_at === 'string' ? meta.captured_at : null;
+      const startLat = typeof meta?.lat === 'number' ? (meta.lat as number) : null;
+      const startLng = typeof meta?.lng === 'number' ? (meta.lng as number) : null;
+
+      setState((prev) => {
+        // Don't overwrite a shift the driver just finished, or a fresher local shift.
+        if (prev.postShiftComplete) return prev;
+        if (prev.activeShiftId && prev.activeShiftId !== activeShift.id) return prev;
+
+        return {
+          ...prev,
+          activeShiftId: prev.activeShiftId ?? activeShift.id,
+          activeShiftVehicleId: prev.activeShiftVehicleId ?? activeShift.vehicle_id ?? null,
+          shiftStarted: true,
+          shiftStartTime:
+            prev.shiftStartTime
+            ?? (activeShift.started_at
+              ? new Date(activeShift.started_at)
+              : capturedAtRaw
+                ? new Date(capturedAtRaw)
+                : null),
+          odometerReading: prev.odometerReading || odometerReading,
+          startOdometerCapturedAt: prev.startOdometerCapturedAt ?? capturedAtRaw,
+          startOdometerLat: prev.startOdometerLat ?? startLat,
+          startOdometerLng: prev.startOdometerLng ?? startLng,
+        };
+      });
+    } catch (e) {
+      console.warn('[AppState] hydrate active shift failed', e);
+    }
+  }, []);
+
+  // Run the cold-start recovery once the driver record is known and there's no
+  // active shift in memory (the killed-and-reopened-mid-shift case).
+  useEffect(() => {
+    const driverRecordId = state.driverRecordId;
+    if (!driverRecordId) return;
+    if (hydrationAttemptedRef.current === driverRecordId) return;
+    hydrationAttemptedRef.current = driverRecordId;
+    if (state.activeShiftId || state.postShiftComplete) return;
+    void hydrateActiveShiftFromServer(driverRecordId);
+  }, [state.driverRecordId, state.activeShiftId, state.postShiftComplete, hydrateActiveShiftFromServer]);
 
   const loadQueuedEvents = async (): Promise<EventQueueItem[]> => {
     const stored = await AsyncStorage.getItem(EVENT_QUEUE_KEY);

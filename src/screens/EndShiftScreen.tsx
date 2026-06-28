@@ -17,7 +17,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
   const { navigation } = props;
   const { closeActiveBreak, endShift, state, updateAppState } = useAppState();
   const { reload: reloadDriverContext } = useDriver();
-  const { reload: reloadActiveShift } = useActiveShift();
+  const { reload: reloadActiveShift, shift: activeShiftRecord } = useActiveShift();
   const [rubbishRemoved, setRubbishRemoved] = useState<'yes' | 'no' | null>(state.endShiftRubbishRemoved);
   const [endShiftNotes, setEndShiftNotes] = useState(state.endShiftNotes);
   const [endOdometerReading, setEndOdometerReading] = useState('');
@@ -34,11 +34,15 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
 
   useEffect(() => {
     const loadShift = async () => {
-      if (!state.activeShiftId) return;
+      // After a cold reopen, in-memory activeShiftId can be null while the active
+      // shift record (from the server) is available — fall back to it so the start
+      // odometer still loads.
+      const shiftId = state.activeShiftId ?? activeShiftRecord?.id ?? null;
+      if (!shiftId) return;
       const { data, error } = await supabase
         .from('shift_events')
         .select('event_type, created_at, metadata')
-        .eq('shift_id', state.activeShiftId)
+        .eq('shift_id', shiftId)
         .in('event_type', ['odometer_start', 'odometer_end', 'shift_start', 'shift_end'])
         .order('created_at', { ascending: false });
       if (error) {
@@ -79,7 +83,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       if (isSubmitting) event.preventDefault();
     });
     return unsubscribe;
-  }, [isSubmitting, navigation, state.activeShiftId]);
+  }, [isSubmitting, navigation, state.activeShiftId, activeShiftRecord?.id]);
 
   const handleRubbishChange = (value: 'yes' | 'no') => {
     setRubbishRemoved(value);
@@ -245,9 +249,20 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
     ?? state.assignedVehicle?.rego
     ?? 'Unknown';
 
-  const shiftStartLabel = state.shiftStartTime
-    ? formatPerthTime(new Date(state.shiftStartTime))
+  const startTimeSource = state.shiftStartTime
+    ?? (activeShiftRecord?.started_at ? new Date(activeShiftRecord.started_at) : null);
+  const shiftStartLabel = startTimeSource
+    ? formatPerthTime(new Date(startTimeSource))
     : 'Not set';
+
+  // Prefer the server-confirmed start odometer (loaded from the odometer_start
+  // event); fall back to the locally-typed value, then "Pending".
+  const startOdometerLabel =
+    startOdometerValue != null
+      ? `${startOdometerValue.toLocaleString()} km`
+      : state.odometerReading
+        ? `${state.odometerReading} km`
+        : 'Pending';
 
   return (
     <ScreenContainer title="End shift" subtitle="Complete your shift and log out">
@@ -255,7 +270,7 @@ export default function EndShiftScreen(props: ScreenProps<'EndShift'>) {
       <InfoCard title="Summary">
         <Text style={styles.text}>Vehicle: {vehicleLabel}</Text>
         <Text style={styles.text}>Start time: {shiftStartLabel}</Text>
-        <Text style={styles.text}>Start Odometer: {state.odometerReading || 'Pending'}</Text>
+        <Text style={styles.text}>Start Odometer: {startOdometerLabel}</Text>
         {shiftLoadError ? <Text style={styles.errorText}>{shiftLoadError}</Text> : null}
       </InfoCard>
 
