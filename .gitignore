@@ -34,3 +34,8 @@ android/app/build/
 .DS_Store
 npm-debug.log
 yarn-error.log
+
+# Expo web build output -- never commit; the committed copies had gone stale and
+# still queried pre_start_checklists / vehicle_checklists, tables that no longer exist.
+dist/
+dist-web-build-check/
